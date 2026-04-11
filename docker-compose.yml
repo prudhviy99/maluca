@@ -1,0 +1,85 @@
+version: '3.9'
+
+services:
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: maluca-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --save "" --appendonly no  # no persistence needed for dev
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - maluca-net
+
+  # ── Demo Backend ───────────────────────────────────────────────────────────
+  demo-backend:
+    build:
+      context: .
+      dockerfile: demo-backend/Dockerfile
+    container_name: maluca-demo-backend
+    environment:
+      PORT: 8081
+    expose:
+      - "8081"          # internal only — not published to host
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - maluca-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Maluca Proxy ──────────────────────────────────────────────────────────
+  maluca-proxy:
+    build:
+      context: .
+      dockerfile: maluca-proxy/Dockerfile
+    container_name: maluca-proxy
+    ports:
+      - "8080:8080"     # public entrypoint — all traffic goes here
+    environment:
+      PORT: 8080
+      UPSTREAM_URL: http://demo-backend:8081
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TRUST_XFF: "false"
+      # Activate JSON logging in Docker
+      SPRING_PROFILES_ACTIVE: json-logging
+    depends_on:
+      redis:
+        condition: service_healthy
+      demo-backend:
+        condition: service_healthy
+    networks:
+      - maluca-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Prometheus (optional — for metrics scraping) ──────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: maluca-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - maluca-net
+    profiles:
+      - observability   # only starts with: docker compose --profile observability up
+
+networks:
+  maluca-net:
+    driver: bridge

@@ -1,0 +1,4 @@
+rootProject.name = 'maluca'
+
+include 'maluca-proxy'
+include 'demo-backend'

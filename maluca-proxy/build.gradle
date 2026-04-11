@@ -1,0 +1,26 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    // Standard blocking web (Spring MVC)
+    // NOTE: Using MVC not WebFlux intentionally for this build — see docs/production-improvements.md
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // Actuator + Prometheus metrics
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
+    // Redis (blocking Lettuce client — matches Spring MVC threading model)
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // Structured/JSON logging
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    // Lombok — reduces boilerplate on model/config classes
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}

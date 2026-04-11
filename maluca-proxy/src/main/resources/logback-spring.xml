@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="maluca"/>
+
+    <!--
+        In production / Docker, emit JSON (one log line per event, easy to ingest).
+        In local dev, use human-readable console output.
+        Toggle via LOGGING_FORMAT env var: json | console (default: console)
+    -->
+    <springProfile name="!json-logging">
+        <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="STDOUT"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="json-logging">
+        <appender name="JSON_STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"service":"${appName}"}</customFields>
+                <includeMdcKeyName>clientKey</includeMdcKeyName>
+                <includeMdcKeyName>requestPath</includeMdcKeyName>
+                <includeMdcKeyName>mitigationAction</includeMdcKeyName>
+                <includeMdcKeyName>riskScore</includeMdcKeyName>
+                <includeMdcKeyName>upstreamStatus</includeMdcKeyName>
+                <includeMdcKeyName>traceId</includeMdcKeyName>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON_STDOUT"/>
+        </root>
+    </springProfile>
+</configuration>

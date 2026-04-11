@@ -1,0 +1,81 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: maluca-proxy
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus,info
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+  endpoint:
+    health:
+      show-details: always
+
+# ─── Maluca-specific configuration ────────────────────────────────────────────
+maluca:
+
+  # Where to proxy allowed traffic
+  upstream:
+    url: ${UPSTREAM_URL:http://localhost:8081}
+    connect-timeout-ms: 5000
+    response-timeout-ms: 30000
+
+  # Client identity extraction
+  identity:
+    # Set true only when Maluca is behind a trusted load-balancer that sets XFF
+    trust-x-forwarded-for: ${TRUST_XFF:false}
+
+  # Policy — all thresholds are tunable without code changes
+  policy:
+    default:
+
+      thresholds:
+        # Raw request frequency limits
+        requests-per-10s: 30           # > this is "high short-window QPS"
+        requests-per-60s: 120          # > this is "high 60s QPS"
+        distinct-paths-per-30s: 15     # > this indicates path scanning
+        sensitive-hits-per-60s: 20     # > this indicates brute-force style
+
+      scoring:
+        # Score contributions per signal breach
+        # Skipping path-scanning-weight for now — see docs/production-improvements.md
+        high-qps-10s-weight: 40
+        sensitive-endpoint-weight: 25
+        prior-block-weight: 50         # If client was recently blocked, skew score up
+
+      bands:
+        # Score thresholds for action escalation
+        allow-max: 39         # 0–39   → ALLOW
+        rate-limit-max: 64    # 40–64  → RATE_LIMIT (429)
+        # 65+               → BLOCK (403, TTL-based)
+
+      actions:
+        block-duration-minutes: 5
+        rate-limit-retry-after-seconds: 60
+
+    # Paths treated as sensitive — hit counts tracked separately
+    sensitive-paths:
+      - /login
+      - /signup
+      - /admin
+      - /api/auth
+      - /api/checkout
+      - /api/payment
+      - /reset-password
+
+logging:
+  level:
+    root: INFO
+    com.maluca: DEBUG
