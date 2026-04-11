@@ -1,0 +1,11 @@
+server:
+  port: ${PORT:8081}
+
+spring:
+  application:
+    name: demo-backend
+
+logging:
+  level:
+    root: INFO
+    com.maluca.demo: DEBUG

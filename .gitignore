@@ -69,3 +69,17 @@ nbdist/
 
 # Environment files
 .env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Docker volumes / local data
+data/
+
+# Gradle wrapper jar is committed (un-ignored above), but skip local caches
+.gradle/
+
