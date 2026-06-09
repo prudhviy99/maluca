@@ -98,7 +98,6 @@ instead of erroring.
 
 ## Documentation
 
-- [`MALUCA_MASTER_PLAN.md`](MALUCA_MASTER_PLAN.md) — the full build/learning plan
 - [`docs/algorithms.md`](docs/algorithms.md) — the five rate limiters, with trade-offs
 - [`docs/benchmarks.md`](docs/benchmarks.md) — measured latency + mitigation effectiveness (and where it loses)
 - [`docs/slos.md`](docs/slos.md) — SLIs/SLOs, golden signals, cardinality rules
