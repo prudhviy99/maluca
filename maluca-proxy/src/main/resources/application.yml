@@ -18,6 +18,13 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    # Disable Spring's built-in Redis ping check: it reports DOWN on a Redis
+    # outage and would aggregate the whole instance to DOWN (503), tripping
+    # liveness probes. Our redisBreaker indicator reports the degradation
+    # tier as UP-with-detail instead — a degraded Maluca is still serving.
+    redis:
+      enabled: false
   tracing:
     sampling:
       # 10% default; turn up for debugging, down under heavy load
@@ -104,6 +111,17 @@ maluca:
 
   mitigation:
     soft-limit-delay-ms: 500
+
+  # Redis resilience. Ops are hard-capped at redis-timeout-ms; a slow Redis
+  # counts as a failure. After enough failures the breaker opens and the
+  # decision path short-circuits to each route's fail-mode.
+  resilience:
+    redis-timeout-ms: 10
+    failure-rate-threshold: 50
+    sliding-window-size: 20
+    minimum-calls: 10
+    open-state-seconds: 10
+    fail-open-by-default: true
 
   # Challenge subsystem. The secret MUST come from the environment in any
   # real deployment; the default exists only so local dev boots.

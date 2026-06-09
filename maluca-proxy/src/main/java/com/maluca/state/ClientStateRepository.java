@@ -25,12 +25,19 @@ public class ClientStateRepository {
     private final RedisScript<List> collectStateScript = LuaScripts.listReturning("collect_state");
 
     private final ReactiveStringRedisTemplate redis;
+    private final RedisCircuitBreaker breaker;
 
-    public ClientStateRepository(ReactiveStringRedisTemplate redis) {
+    public ClientStateRepository(ReactiveStringRedisTemplate redis, RedisCircuitBreaker breaker) {
         this.redis = redis;
+        this.breaker = breaker;
     }
 
-    /** Records this request into all rolling windows and returns the updated snapshot. */
+    /**
+     * Records this request into all rolling windows and returns the updated
+     * snapshot. Guarded by the breaker: if Redis is unavailable this yields
+     * {@link ClientState#EMPTY} (no state ⇒ a benign score), and the
+     * fail-open/closed decision is made downstream from the empty state.
+     */
     public Mono<ClientState> collect(String clientKey, String path, boolean sensitive) {
         List<String> keys = List.of(
                 PREFIX + "cnt10:" + clientKey,
@@ -41,10 +48,15 @@ public class ClientStateRepository {
                 PREFIX + "sens:" + clientKey,
                 PREFIX + "sticky:" + clientKey,
                 PREFIX + "4xx:" + clientKey);
-        return redis.execute(collectStateScript, keys,
+        Mono<ClientState> call = redis.execute(collectStateScript, keys,
                         List.of(path, sensitive ? "1" : "0", "30", "60"))
                 .next()
                 .map(ClientStateRepository::toClientState);
+        return breaker.run(call, ClientState.EMPTY);
+    }
+
+    public boolean redisHealthy() {
+        return !breaker.isOpen();
     }
 
     /**

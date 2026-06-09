@@ -20,6 +20,7 @@ public record MalucaProperties(
         Bands bands,
         Hysteresis hysteresis,
         Mitigation mitigation,
+        Resilience resilience,
         Challenge challenge,
         @DefaultValue("") List<String> sensitivePaths,
         /** External policy file; blank -> classpath:policies.yml (no hot reload). */
@@ -108,6 +109,17 @@ public record MalucaProperties(
 
     public record Mitigation(
             @DefaultValue("500") long softLimitDelayMs) {
+    }
+
+    /** Redis circuit breaker + timeout (Phase 9 resilience). */
+    public record Resilience(
+            @DefaultValue("10") long redisTimeoutMs,
+            @DefaultValue("50") float failureRateThreshold,
+            @DefaultValue("20") int slidingWindowSize,
+            @DefaultValue("10") int minimumCalls,
+            @DefaultValue("10") long openStateSeconds,
+            /** Default fail behavior when a policy doesn't specify one. */
+            @DefaultValue("true") boolean failOpenByDefault) {
     }
 
     /**

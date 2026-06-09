@@ -21,7 +21,8 @@ class PolicyRegistryTest {
         MalucaProperties base = TestFixtures.defaultProperties();
         return new MalucaProperties(base.upstream(), base.identity(), base.limits(),
                 base.scoring(), base.bands(), base.hysteresis(), base.mitigation(),
-                base.challenge(), base.sensitivePaths(), path, base.adminToken(), base.tierKeys());
+                base.resilience(), base.challenge(), base.sensitivePaths(), path,
+                base.adminToken(), base.tierKeys());
     }
 
     // ── Classpath fallback + resolution ──────────────────────────────────────

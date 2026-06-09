@@ -39,6 +39,7 @@ import com.maluca.ratelimit.RateLimiter;
 import com.maluca.scoring.Scorer;
 import com.maluca.scoring.SignalsCollector;
 import com.maluca.state.ClientStateRepository;
+import com.maluca.state.RedisCircuitBreaker;
 
 import reactor.core.publisher.Mono;
 
@@ -61,6 +62,7 @@ public class MitigationWebFilter implements WebFilter, Ordered {
     private final ClientTierService tierService;
     private final PolicyRegistry policyRegistry;
     private final ClientStateRepository stateRepository;
+    private final RedisCircuitBreaker breaker;
     private final RateLimiter rateLimiter;
     private final SignalsCollector signalsCollector;
     private final Scorer scorer;
@@ -82,6 +84,7 @@ public class MitigationWebFilter implements WebFilter, Ordered {
                                ClientTierService tierService,
                                PolicyRegistry policyRegistry,
                                ClientStateRepository stateRepository,
+                               RedisCircuitBreaker breaker,
                                RateLimiter rateLimiter,
                                SignalsCollector signalsCollector,
                                Scorer scorer,
@@ -101,6 +104,7 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         this.tierService = tierService;
         this.policyRegistry = policyRegistry;
         this.stateRepository = stateRepository;
+        this.breaker = breaker;
         this.rateLimiter = rateLimiter;
         this.signalsCollector = signalsCollector;
         this.scorer = scorer;
@@ -154,6 +158,12 @@ public class MitigationWebFilter implements WebFilter, Ordered {
             return finish(exchange, identity, denied, policy, path, startNanos);
         }
 
+        // Redis open-circuit: skip the whole stateful pipeline and apply the
+        // route's fail-mode immediately (degradation tier PASSTHROUGH/closed).
+        if (!stateRepository.redisHealthy()) {
+            return finish(exchange, identity, degradedDecision(policy), policy, path, startNanos);
+        }
+
         boolean sensitive = isSensitive(path);
         boolean datacenter = datacenterDetector.isDatacenter(identity.ip());
 
@@ -200,7 +210,23 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         }
         // key includes the policy so per-route limits don't share counters
         String key = (policy != null ? policy.name() : "global") + ":" + identity.compositeKey();
-        return rateLimiter.check(key, config);
+        // breaker-guarded: a Redis failure yields "allowed" here; the
+        // fail-open/closed decision is applied in decide() from redis health
+        return breaker.run(rateLimiter.check(key, config), LimitDecision.allowedNoLimit());
+    }
+
+    /**
+     * When Redis is down, scoring and limiting can't run. Honor the route's
+     * fail-mode: fail-closed routes (e.g. /login) BLOCK rather than admit an
+     * unchecked credential-stuffing burst; everything else fails open.
+     */
+    private Decision degradedDecision(CompiledPolicy policy) {
+        boolean failClosed = policy != null
+                ? policy.failMode() == PolicyDefinition.FailMode.FAIL_CLOSED
+                : !properties.resilience().failOpenByDefault();
+        MitigationAction action = failClosed ? MitigationAction.BLOCK : MitigationAction.ALLOW;
+        return Decision.of(action, failClosed ? 100 : 0,
+                "redis_down_fail_" + (failClosed ? "closed" : "open"), java.util.Map.of());
     }
 
     private Mono<Decision> decide(ClientIdentity identity, RequestMeta meta, ClientState state,
