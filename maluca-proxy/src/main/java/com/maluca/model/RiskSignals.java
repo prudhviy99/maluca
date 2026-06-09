@@ -13,6 +13,8 @@ public record RiskSignals(
         long fourxx60s,
         int headerAnomalies,
         UaClass uaClass,
+        boolean uaHeaderMismatch,
+        boolean datacenter,
         boolean limitExceeded,
         boolean priorEscalation,
         boolean onDenylist) {
@@ -29,6 +31,8 @@ public record RiskSignals(
         private long fourxx60s;
         private int headerAnomalies;
         private UaClass uaClass = UaClass.UNKNOWN;
+        private boolean uaHeaderMismatch;
+        private boolean datacenter;
         private boolean limitExceeded;
         private boolean priorEscalation;
         private boolean onDenylist;
@@ -40,13 +44,16 @@ public record RiskSignals(
         public Builder fourxx60s(long v) { this.fourxx60s = v; return this; }
         public Builder headerAnomalies(int v) { this.headerAnomalies = v; return this; }
         public Builder uaClass(UaClass v) { this.uaClass = v; return this; }
+        public Builder uaHeaderMismatch(boolean v) { this.uaHeaderMismatch = v; return this; }
+        public Builder datacenter(boolean v) { this.datacenter = v; return this; }
         public Builder limitExceeded(boolean v) { this.limitExceeded = v; return this; }
         public Builder priorEscalation(boolean v) { this.priorEscalation = v; return this; }
         public Builder onDenylist(boolean v) { this.onDenylist = v; return this; }
 
         public RiskSignals build() {
             return new RiskSignals(burst10s, sustained60s, distinctPaths30s, sensitiveHits60s,
-                    fourxx60s, headerAnomalies, uaClass, limitExceeded, priorEscalation, onDenylist);
+                    fourxx60s, headerAnomalies, uaClass, uaHeaderMismatch, datacenter,
+                    limitExceeded, priorEscalation, onDenylist);
         }
     }
 }

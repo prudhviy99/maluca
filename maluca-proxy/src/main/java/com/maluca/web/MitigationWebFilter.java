@@ -9,7 +9,11 @@ import org.springframework.web.server.WebFilterChain;
 import com.maluca.challenge.ChallengeService;
 import com.maluca.config.MalucaProperties;
 import com.maluca.identity.ClientIdentityExtractor;
+import com.maluca.identity.DatacenterDetector;
+import com.maluca.identity.UaClassifier;
+import com.maluca.identity.VerifiedBotService;
 import com.maluca.metrics.ChallengeMetrics;
+import com.maluca.model.UaClass;
 import com.maluca.metrics.MalucaMetrics;
 import com.maluca.mitigation.HysteresisService;
 import com.maluca.mitigation.MitigationExecutor;
@@ -42,6 +46,9 @@ import reactor.core.publisher.Mono;
 public class MitigationWebFilter implements WebFilter, Ordered {
 
     private final ClientIdentityExtractor identityExtractor;
+    private final UaClassifier uaClassifier;
+    private final VerifiedBotService verifiedBotService;
+    private final DatacenterDetector datacenterDetector;
     private final ClientStateRepository stateRepository;
     private final RateLimiter rateLimiter;
     private final SignalsCollector signalsCollector;
@@ -58,6 +65,9 @@ public class MitigationWebFilter implements WebFilter, Ordered {
     private final RateLimitConfig baselineLimit;
 
     public MitigationWebFilter(ClientIdentityExtractor identityExtractor,
+                               UaClassifier uaClassifier,
+                               VerifiedBotService verifiedBotService,
+                               DatacenterDetector datacenterDetector,
                                ClientStateRepository stateRepository,
                                RateLimiter rateLimiter,
                                SignalsCollector signalsCollector,
@@ -72,6 +82,9 @@ public class MitigationWebFilter implements WebFilter, Ordered {
                                DecisionLogger decisionLogger,
                                MalucaProperties properties) {
         this.identityExtractor = identityExtractor;
+        this.uaClassifier = uaClassifier;
+        this.verifiedBotService = verifiedBotService;
+        this.datacenterDetector = datacenterDetector;
         this.stateRepository = stateRepository;
         this.rateLimiter = rateLimiter;
         this.signalsCollector = signalsCollector;
@@ -101,7 +114,8 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         }
 
         long startNanos = System.nanoTime();
-        ClientIdentity identity = identityExtractor.extract(exchange);
+        RequestMeta meta = RequestMeta.from(exchange.getRequest());
+        ClientIdentity identity = identityExtractor.extract(exchange, meta);
 
         // A valid signed pass cookie (issued on challenge success) bypasses
         // the scorer entirely for its TTL — the client already proved itself.
@@ -110,18 +124,33 @@ public class MitigationWebFilter implements WebFilter, Ordered {
             return proxyService.forward(exchange, identity);
         }
 
-        RequestMeta meta = RequestMeta.from(exchange.getRequest());
         boolean sensitive = isSensitive(path);
+        boolean datacenter = datacenterDetector.isDatacenter(identity.ip());
 
-        return stateRepository.collect(identity.compositeKey(), path, sensitive)
-                .flatMap(state -> checkBaselineLimit(identity)
-                        .flatMap(limit -> decide(identity, meta, state, limit)))
+        return resolveUaClass(meta, identity.ip())
+                .flatMap(uaClass -> stateRepository.collect(identity.compositeKey(), path, sensitive)
+                        .flatMap(state -> checkBaselineLimit(identity)
+                                .flatMap(limit -> decide(identity, meta, state, limit, uaClass, datacenter))))
                 .flatMap(decision -> {
                     metrics.recordAddedLatency(System.nanoTime() - startNanos);
                     metrics.recordDecision(decision.action());
                     decisionLogger.log(identity, decision, path);
                     return executor.execute(exchange, identity, decision);
                 });
+    }
+
+    /**
+     * UA classes are claims; the VERIFIED_BOT claim is the one worth lying
+     * about, so it gets checked with forward-confirmed reverse DNS (cached).
+     * A failed check reclassifies the client as a spoofer.
+     */
+    private Mono<UaClass> resolveUaClass(RequestMeta meta, String ip) {
+        UaClass claimed = uaClassifier.classify(meta.userAgent());
+        if (claimed != UaClass.VERIFIED_BOT) {
+            return Mono.just(claimed);
+        }
+        return verifiedBotService.isVerifiedBot(ip)
+                .map(verified -> verified ? UaClass.VERIFIED_BOT : UaClass.KNOWN_BAD_BOT);
     }
 
     private Mono<LimitDecision> checkBaselineLimit(ClientIdentity identity) {
@@ -131,9 +160,9 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         return rateLimiter.check(identity.compositeKey(), baselineLimit);
     }
 
-    private Mono<Decision> decide(ClientIdentity identity, RequestMeta meta,
-                                  ClientState state, LimitDecision limit) {
-        RiskSignals signals = signalsCollector.collect(meta, state, !limit.allowed());
+    private Mono<Decision> decide(ClientIdentity identity, RequestMeta meta, ClientState state,
+                                  LimitDecision limit, UaClass uaClass, boolean datacenter) {
+        RiskSignals signals = signalsCollector.collect(meta, state, uaClass, datacenter, !limit.allowed());
         ScoreResult score = scorer.score(signals);
 
         MitigationAction scored = policyResolver.resolve(score.score());

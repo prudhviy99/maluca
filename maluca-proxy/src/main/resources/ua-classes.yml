@@ -1,0 +1,36 @@
+# User-agent classification rules: class -> case-insensitive substrings.
+# First match wins, in file order. Anything unmatched falls back to
+# browser-family heuristics, then UNKNOWN.
+#
+# VERIFIED_BOT entries are *claims* — FCrDNS verification decides whether
+# the claim is believed (see VerifiedBotService).
+
+verified_bot:
+  - googlebot
+  - bingbot
+  - duckduckbot
+  - applebot
+  - yandexbot
+
+known_bad_bot:
+  - zgrab
+  - masscan
+  - nikto
+  - sqlmap
+  - nmap
+  - dirbuster
+  - gobuster
+
+script_client:
+  - curl/
+  - wget/
+  - python-requests
+  - python-urllib
+  - go-http-client
+  - scrapy
+  - httpclient
+  - okhttp
+  - aiohttp
+  - java/
+  - libwww-perl
+  - php/

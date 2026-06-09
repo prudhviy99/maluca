@@ -57,8 +57,13 @@ public class ChallengeService {
     // ── Issuance ──────────────────────────────────────────────────────────────
 
     public IssuedChallenge issue(String clientKey, int score) {
-        ChallengeType type = score <= cfg.jsLiteMaxScore() ? ChallengeType.JS_LITE : ChallengeType.POW;
-        int difficulty = type == ChallengeType.JS_LITE ? 0 : adaptiveDifficulty(score, 0);
+        return issue(clientKey, score, 0);
+    }
+
+    public IssuedChallenge issue(String clientKey, int score, int datacenterBump) {
+        ChallengeType type = score <= cfg.jsLiteMaxScore() && datacenterBump == 0
+                ? ChallengeType.JS_LITE : ChallengeType.POW;
+        int difficulty = type == ChallengeType.JS_LITE ? 0 : adaptiveDifficulty(score, datacenterBump);
         return issue(clientKey, type, difficulty);
     }
 

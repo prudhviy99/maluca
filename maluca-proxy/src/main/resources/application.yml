@@ -30,9 +30,21 @@ maluca:
     max-connections: 500
 
   # Client identity extraction. Only trust XFF behind a known load balancer.
+  # strategy: NETWORK (IP only) | COMPOSITE (ip|session|fingerprint) | FINGERPRINT
   identity:
     trust-x-forwarded-for: ${TRUST_XFF:false}
     trusted-proxies: []
+    strategy: ${IDENTITY_STRATEGY:NETWORK}
+    session-cookie: session
+    # Cloud/datacenter ranges that bump score and PoW difficulty.
+    # Production: replace with a GeoLite2-ASN lookup. Examples below are
+    # well-known cloud blocks for demoing the signal.
+    datacenter-cidrs:
+      - 3.0.0.0/9          # AWS
+      - 34.64.0.0/10       # GCP
+      - 104.16.0.0/13      # Cloudflare
+      - 159.65.0.0/16      # DigitalOcean
+      - 178.62.0.0/16      # DigitalOcean
 
   # Baseline fixed-window cap; breaching it feeds the score and floors the
   # action at HARD_LIMIT (per-route policies supersede these later)
@@ -57,6 +69,8 @@ maluca:
       known-bad-bot: 60
       script-client: 15
       unknown-ua: 8
+      ua-header-mismatch: 12
+      datacenter: 10
       limit-exceeded: 30
       prior-escalation: 20
     thresholds:

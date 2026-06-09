@@ -31,7 +31,12 @@ public record MalucaProperties(
 
     public record Identity(
             @DefaultValue("false") boolean trustXForwardedFor,
-            @DefaultValue("") List<String> trustedProxies) {
+            @DefaultValue("") List<String> trustedProxies,
+            @DefaultValue("NETWORK") KeyStrategy strategy,
+            @DefaultValue("session") String sessionCookie,
+            @DefaultValue("") List<String> datacenterCidrs) {
+
+        public enum KeyStrategy { NETWORK, COMPOSITE, FINGERPRINT }
     }
 
     /** Baseline rate cap. Breaching it feeds the score and floors the action at HARD_LIMIT. */
@@ -63,6 +68,8 @@ public record MalucaProperties(
                 @DefaultValue("60") int knownBadBot,
                 @DefaultValue("15") int scriptClient,
                 @DefaultValue("8") int unknownUa,
+                @DefaultValue("12") int uaHeaderMismatch,
+                @DefaultValue("10") int datacenter,
                 @DefaultValue("30") int limitExceeded,
                 @DefaultValue("20") int priorEscalation) {
         }

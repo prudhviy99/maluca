@@ -55,8 +55,10 @@ public class MitigationExecutor {
     }
 
     private Mono<Void> serveChallenge(ServerWebExchange exchange, ClientIdentity identity, Decision decision) {
+        // datacenter-origin clients start one PoW difficulty level higher
+        int datacenterBump = decision.contributions().containsKey("datacenter") ? 1 : 0;
         ChallengeService.IssuedChallenge challenge =
-                challengeService.issue(identity.compositeKey(), decision.score());
+                challengeService.issue(identity.compositeKey(), decision.score(), datacenterBump);
         challengeMetrics.issued(challenge.type().name());
 
         if (acceptsHtml(exchange)) {

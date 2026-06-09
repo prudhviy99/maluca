@@ -66,6 +66,12 @@ public class WeightedLinearScorer implements Scorer {
             contributions.put("ua_class_" + signals.uaClass().name().toLowerCase(), uaWeight);
         }
 
+        if (signals.uaHeaderMismatch()) {
+            contributions.put("ua_header_mismatch", (double) cfg.weights().uaHeaderMismatch());
+        }
+        if (signals.datacenter()) {
+            contributions.put("datacenter", (double) cfg.weights().datacenter());
+        }
         if (signals.limitExceeded()) {
             contributions.put("limit_exceeded", (double) cfg.weights().limitExceeded());
         }
