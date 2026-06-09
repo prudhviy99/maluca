@@ -34,13 +34,54 @@ maluca:
     trust-x-forwarded-for: ${TRUST_XFF:false}
     trusted-proxies: []
 
-  # MVP fixed-window limits (per-route policies supersede these later)
+  # Baseline fixed-window cap; breaching it feeds the score and floors the
+  # action at HARD_LIMIT (per-route policies supersede these later)
   limits:
     enabled: true
     max-requests: 30
     window-seconds: 10
     block-threshold-per-60s: 300
     block-minutes: 5
+
+  # Weighted-linear risk scoring. Rate signals ramp linearly above their
+  # threshold (value == 2x threshold contributes the full weight, capped at
+  # 1.5x). Booleans contribute the full weight.
+  scoring:
+    weights:
+      burst: 40
+      sustained: 25
+      path-scan: 20
+      sensitive: 25
+      fourxx: 15
+      header-anomaly: 15
+      known-bad-bot: 60
+      script-client: 15
+      unknown-ua: 8
+      limit-exceeded: 30
+      prior-escalation: 20
+    thresholds:
+      burst-per-10s: 30
+      sustained-per-60s: 120
+      distinct-paths-per-30s: 15
+      sensitive-hits-per-60s: 20
+      fourxx-per-60s: 10
+
+  # Score bands -> progressive mitigation actions
+  bands:
+    observe-min: 30
+    soft-limit-min: 50
+    hard-limit-min: 65
+    challenge-min: 75
+    block-min: 90
+
+  # How long an escalated client stays escalated even if its score drops
+  hysteresis:
+    hard-limit-ttl-seconds: 30
+    challenge-ttl-seconds: 120
+    block-ttl-seconds: 300
+
+  mitigation:
+    soft-limit-delay-ms: 500
 
   # Paths whose hit counts are tracked separately as a brute-force signal
   sensitive-paths:

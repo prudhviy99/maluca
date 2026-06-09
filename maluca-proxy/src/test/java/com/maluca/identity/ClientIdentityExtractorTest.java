@@ -15,11 +15,7 @@ import com.maluca.model.ClientIdentity;
 class ClientIdentityExtractorTest {
 
     private static MalucaProperties props(boolean trustXff, List<String> trustedProxies) {
-        return new MalucaProperties(
-                new MalucaProperties.Upstream("http://localhost:8081", 5000, 30000, 100),
-                new MalucaProperties.Identity(trustXff, trustedProxies),
-                new MalucaProperties.Limits(true, 30, 10, 300, 5),
-                List.of());
+        return com.maluca.TestFixtures.properties(trustXff, trustedProxies);
     }
 
     private static MockServerWebExchange exchange(String peerIp, String xff) {
