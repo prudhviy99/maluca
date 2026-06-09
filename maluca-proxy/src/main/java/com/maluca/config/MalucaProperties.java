@@ -33,13 +33,21 @@ public record MalucaProperties(
             @DefaultValue("") List<String> trustedProxies) {
     }
 
-    /** Baseline fixed-window cap. Breaching it feeds the score and floors the action at HARD_LIMIT. */
+    /** Baseline rate cap. Breaching it feeds the score and floors the action at HARD_LIMIT. */
     public record Limits(
             @DefaultValue("true") boolean enabled,
+            @DefaultValue("FIXED_WINDOW") com.maluca.model.RateLimitAlgorithm algorithm,
             @DefaultValue("30") long maxRequests,
             @DefaultValue("10") long windowSeconds,
+            @DefaultValue("3") double ratePerSecond,
+            @DefaultValue("30") long burst,
             @DefaultValue("300") long blockThresholdPer60s,
             @DefaultValue("5") long blockMinutes) {
+
+        public com.maluca.model.RateLimitConfig toConfig() {
+            return new com.maluca.model.RateLimitConfig(
+                    algorithm, maxRequests, windowSeconds, ratePerSecond, burst);
+        }
     }
 
     public record Scoring(Weights weights, Thresholds thresholds) {

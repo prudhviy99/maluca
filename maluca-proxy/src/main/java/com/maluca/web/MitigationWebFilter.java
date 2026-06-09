@@ -17,7 +17,6 @@ import com.maluca.model.ClientState;
 import com.maluca.model.Decision;
 import com.maluca.model.LimitDecision;
 import com.maluca.model.MitigationAction;
-import com.maluca.model.RateLimitAlgorithm;
 import com.maluca.model.RateLimitConfig;
 import com.maluca.model.RequestMeta;
 import com.maluca.model.RiskSignals;
@@ -78,10 +77,7 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         this.metrics = metrics;
         this.decisionLogger = decisionLogger;
         this.properties = properties;
-        this.baselineLimit = RateLimitConfig.windowed(
-                RateLimitAlgorithm.FIXED_WINDOW,
-                properties.limits().maxRequests(),
-                properties.limits().windowSeconds());
+        this.baselineLimit = properties.limits().toConfig();
     }
 
     @Override

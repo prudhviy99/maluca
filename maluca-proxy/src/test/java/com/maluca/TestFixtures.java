@@ -18,7 +18,8 @@ public final class TestFixtures {
         return new MalucaProperties(
                 new MalucaProperties.Upstream("http://localhost:8081", 5000, 30000, 100),
                 new MalucaProperties.Identity(trustXff, trustedProxies),
-                new MalucaProperties.Limits(true, 30, 10, 300, 5),
+                new MalucaProperties.Limits(true, com.maluca.model.RateLimitAlgorithm.FIXED_WINDOW,
+                        30, 10, 3, 30, 300, 5),
                 new MalucaProperties.Scoring(
                         new MalucaProperties.Scoring.Weights(40, 25, 20, 25, 15, 15, 60, 15, 8, 30, 20),
                         new MalucaProperties.Scoring.Thresholds(30, 120, 15, 20, 10)),
