@@ -19,11 +19,38 @@ management:
     health:
       show-details: always
 
+# ─── Maluca configuration ─────────────────────────────────────────────────────
 maluca:
+
+  # Where allowed traffic is forwarded
   upstream:
     url: ${UPSTREAM_URL:http://localhost:8081}
     connect-timeout-ms: 5000
     response-timeout-ms: 30000
+    max-connections: 500
+
+  # Client identity extraction. Only trust XFF behind a known load balancer.
+  identity:
+    trust-x-forwarded-for: ${TRUST_XFF:false}
+    trusted-proxies: []
+
+  # MVP fixed-window limits (per-route policies supersede these later)
+  limits:
+    enabled: true
+    max-requests: 30
+    window-seconds: 10
+    block-threshold-per-60s: 300
+    block-minutes: 5
+
+  # Paths whose hit counts are tracked separately as a brute-force signal
+  sensitive-paths:
+    - /login
+    - /signup
+    - /admin
+    - /api/auth
+    - /api/checkout
+    - /api/payment
+    - /reset-password
 
 logging:
   level:
