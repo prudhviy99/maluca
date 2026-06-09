@@ -1,7 +1,7 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.3.5' apply false
-    id 'io.spring.dependency-management' version '1.1.6' apply false
+    id 'org.springframework.boot' version '3.5.3' apply false
+    id 'io.spring.dependency-management' version '1.1.7' apply false
 }
 
 subprojects {
@@ -12,8 +12,9 @@ subprojects {
     version = '0.1.0-SNAPSHOT'
 
     java {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
     }
 
     repositories {
@@ -22,13 +23,7 @@ subprojects {
 
     dependencyManagement {
         imports {
-            mavenBom "org.springframework.boot:spring-boot-dependencies:3.3.5"
-        }
-    }
-
-    configurations {
-        compileOnly {
-            extendsFrom annotationProcessor
+            mavenBom "org.springframework.boot:spring-boot-dependencies:3.5.3"
         }
     }
 
@@ -38,5 +33,9 @@ subprojects {
 
     tasks.withType(Test).configureEach {
         useJUnitPlatform()
+        testLogging {
+            events 'failed', 'skipped'
+            exceptionFormat 'full'
+        }
     }
 }

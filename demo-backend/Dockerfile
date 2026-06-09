@@ -1,23 +1,23 @@
-FROM gradle:8.10.2-jdk21-alpine AS build
+# ── Build stage ───────────────────────────────────────────────────────────────
+FROM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
-COPY settings.gradle build.gradle ./
+COPY gradlew settings.gradle build.gradle ./
+COPY gradle ./gradle
+COPY maluca-proxy/build.gradle maluca-proxy/build.gradle
 COPY demo-backend/build.gradle demo-backend/build.gradle
+RUN ./gradlew :demo-backend:dependencies --no-daemon -q > /dev/null 2>&1 || true
+
 COPY demo-backend/src demo-backend/src
+RUN ./gradlew :demo-backend:bootJar --no-daemon
 
-RUN gradle :demo-backend:bootJar --no-daemon -x test
-
-FROM eclipse-temurin:21-jre-alpine
+# ── Runtime stage ─────────────────────────────────────────────────────────────
+FROM eclipse-temurin:21-jre
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /workspace/demo-backend/build/libs/*.jar app.jar
 
-RUN addgroup -S maluca && adduser -S maluca -G maluca
-USER maluca
-
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=70"
 EXPOSE 8081
-
-ENTRYPOINT ["java", \
-  "-XX:+UseContainerSupport", \
-  "-XX:MaxRAMPercentage=75.0", \
-  "-jar", "app.jar"]
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

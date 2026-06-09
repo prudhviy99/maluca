@@ -3,24 +3,34 @@ plugins {
 }
 
 dependencies {
-    // Standard blocking web (Spring MVC)
-    // NOTE: Using MVC not WebFlux intentionally for this build — see docs/production-improvements.md
-    implementation 'org.springframework.boot:spring-boot-starter-web'
+    // Reactive web stack — the proxy is fully non-blocking
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+
+    // Reactive Redis (Lettuce) for shared counters, decision state, replay protection
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
 
     // Actuator + Prometheus metrics
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
-    // Redis (blocking Lettuce client — matches Spring MVC threading model)
-    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    // Distributed tracing: Micrometer Tracing -> OpenTelemetry -> OTLP (Jaeger)
+    implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+    implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
 
     // Structured/JSON logging
     implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
 
-    // Lombok — reduces boilerplate on model/config classes
-    compileOnly 'org.projectlombok:lombok'
-    annotationProcessor 'org.projectlombok:lombok'
+    // Circuit breaker around Redis (fail-open / fail-closed policy)
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
+    implementation 'io.github.resilience4j:resilience4j-reactor:2.2.0'
+
+    // Hot-reloadable policy files
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml'
 
     // Test
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.projectreactor:reactor-test'
+    testImplementation 'net.jqwik:jqwik:1.8.4'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers'
 }

@@ -5,7 +5,8 @@ spring:
   application:
     name: demo-backend
 
-logging:
-  level:
-    root: INFO
-    com.maluca.demo: DEBUG
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

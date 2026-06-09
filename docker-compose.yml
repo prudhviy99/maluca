@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
 
   # ── Redis ──────────────────────────────────────────────────────────────────
@@ -8,7 +6,7 @@ services:
     container_name: maluca-redis
     ports:
       - "6379:6379"
-    command: redis-server --save "" --appendonly no  # no persistence needed for dev
+    command: redis-server --save "" --appendonly no   # no persistence needed for dev
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -26,10 +24,7 @@ services:
     environment:
       PORT: 8081
     expose:
-      - "8081"          # internal only — not published to host
-    depends_on:
-      redis:
-        condition: service_healthy
+      - "8081"            # internal only — not published to host
     networks:
       - maluca-net
     healthcheck:
@@ -45,14 +40,15 @@ services:
       dockerfile: maluca-proxy/Dockerfile
     container_name: maluca-proxy
     ports:
-      - "8080:8080"     # public entrypoint — all traffic goes here
+      - "8080:8080"       # public entrypoint — all traffic goes here
     environment:
       PORT: 8080
       UPSTREAM_URL: http://demo-backend:8081
       REDIS_HOST: redis
       REDIS_PORT: 6379
       TRUST_XFF: "false"
-      # Activate JSON logging in Docker
+      MALUCA_CHALLENGE_SECRET: ${MALUCA_CHALLENGE_SECRET:-dev-only-secret-change-me}
+      MALUCA_ADMIN_TOKEN: ${MALUCA_ADMIN_TOKEN:-dev-admin-token}
       SPRING_PROFILES_ACTIVE: json-logging
     depends_on:
       redis:
@@ -67,9 +63,9 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── Prometheus (optional — for metrics scraping) ──────────────────────────
+  # ── Observability stack (start with --profile observability) ──────────────
   prometheus:
-    image: prom/prometheus:v2.51.0
+    image: prom/prometheus:v2.53.0
     container_name: maluca-prometheus
     ports:
       - "9090:9090"
@@ -78,7 +74,38 @@ services:
     networks:
       - maluca-net
     profiles:
-      - observability   # only starts with: docker compose --profile observability up
+      - observability
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: maluca-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - maluca-net
+    profiles:
+      - observability
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: maluca-jaeger
+    ports:
+      - "16686:16686"   # UI
+      - "4318:4318"     # OTLP HTTP ingest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - maluca-net
+    profiles:
+      - observability
 
 networks:
   maluca-net:

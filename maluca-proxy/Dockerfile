@@ -1,29 +1,24 @@
-# Multi-stage build — build jar in a gradle image, copy into slim JRE image
-
-FROM gradle:8.10.2-jdk21-alpine AS build
+# ── Build stage ───────────────────────────────────────────────────────────────
+FROM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
-# Copy only files needed for maluca-proxy module
-COPY settings.gradle build.gradle ./
+COPY gradlew settings.gradle build.gradle ./
+COPY gradle ./gradle
 COPY maluca-proxy/build.gradle maluca-proxy/build.gradle
+COPY demo-backend/build.gradle demo-backend/build.gradle
+# Warm the dependency cache before copying sources (better layer reuse)
+RUN ./gradlew :maluca-proxy:dependencies --no-daemon -q > /dev/null 2>&1 || true
+
 COPY maluca-proxy/src maluca-proxy/src
+RUN ./gradlew :maluca-proxy:bootJar --no-daemon
 
-# Build without running tests (tests run in CI separately)
-RUN gradle :maluca-proxy:bootJar --no-daemon -x test
-
-# ── Runtime image ─────────────────────────────────────────────────────────────
-FROM eclipse-temurin:21-jre-alpine
+# ── Runtime stage ─────────────────────────────────────────────────────────────
+FROM eclipse-temurin:21-jre
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /workspace/maluca-proxy/build/libs/*.jar app.jar
 
-# Non-root user for security
-RUN addgroup -S maluca && adduser -S maluca -G maluca
-USER maluca
-
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -XX:+UseG1GC"
 EXPOSE 8080
-
-ENTRYPOINT ["java", \
-  "-XX:+UseContainerSupport", \
-  "-XX:MaxRAMPercentage=75.0", \
-  "-jar", "app.jar"]
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
