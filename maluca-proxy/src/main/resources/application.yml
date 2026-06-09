@@ -1,9 +1,12 @@
 server:
   port: ${PORT:8080}
+  shutdown: graceful   # let in-flight requests finish on SIGTERM (zero-downtime rolls)
 
 spring:
   application:
     name: maluca-proxy
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
   data:
     redis:
       host: ${REDIS_HOST:localhost}

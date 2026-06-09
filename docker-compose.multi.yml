@@ -1,0 +1,71 @@
+# Multi-instance overlay: two Maluca instances behind an NGINX round-robin,
+# sharing one Redis. Run with:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.multi.yml up \
+#     redis demo-backend maluca-proxy-1 maluca-proxy-2 lb
+#
+# Public entrypoint is the LB on :8080. The single-instance maluca-proxy from
+# the base file is not started in this configuration.
+services:
+
+  maluca-proxy-1:
+    build:
+      context: .
+      dockerfile: maluca-proxy/Dockerfile
+    container_name: maluca-proxy-1
+    environment:
+      PORT: 8080
+      UPSTREAM_URL: http://demo-backend:8081
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TRUST_XFF: "true"
+      MALUCA_CHALLENGE_SECRET: ${MALUCA_CHALLENGE_SECRET:-dev-only-secret-change-me}
+      MALUCA_ADMIN_TOKEN: ${MALUCA_ADMIN_TOKEN:-dev-admin-token}
+      SPRING_PROFILES_ACTIVE: json-logging
+    depends_on:
+      redis:
+        condition: service_healthy
+      demo-backend:
+        condition: service_healthy
+    networks:
+      - maluca-net
+
+  maluca-proxy-2:
+    build:
+      context: .
+      dockerfile: maluca-proxy/Dockerfile
+    container_name: maluca-proxy-2
+    environment:
+      PORT: 8080
+      UPSTREAM_URL: http://demo-backend:8081
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TRUST_XFF: "true"
+      MALUCA_CHALLENGE_SECRET: ${MALUCA_CHALLENGE_SECRET:-dev-only-secret-change-me}
+      MALUCA_ADMIN_TOKEN: ${MALUCA_ADMIN_TOKEN:-dev-admin-token}
+      SPRING_PROFILES_ACTIVE: json-logging
+    depends_on:
+      redis:
+        condition: service_healthy
+      demo-backend:
+        condition: service_healthy
+    networks:
+      - maluca-net
+
+  lb:
+    image: nginx:1.27-alpine
+    container_name: maluca-lb
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/nginx-lb.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - maluca-proxy-1
+      - maluca-proxy-2
+    networks:
+      - maluca-net
+
+  # Override the base single-instance proxy so it doesn't also grab :8080.
+  maluca-proxy:
+    profiles:
+      - disabled

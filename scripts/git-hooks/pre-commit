@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Blocks commits that would leak secrets. Install with:
+#   ln -sf ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
+set -euo pipefail
+
+fail=0
+
+# 1. Never commit a real .env (only .env.example is allowed)
+if git diff --cached --name-only | grep -qE '(^|/)\.env$'; then
+  echo "✗ Refusing to commit a .env file. Use .env.example for templates."
+  fail=1
+fi
+
+# 2. Scan staged content for obvious secret patterns
+staged=$(git diff --cached -U0 --no-color | grep '^+' | grep -v '^+++' || true)
+patterns=(
+  'AKIA[0-9A-Z]{16}'                       # AWS access key id
+  'aws_secret_access_key'
+  '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+  'MALUCA_CHALLENGE_SECRET=[^$].*[A-Za-z0-9]{12}'   # a real-looking secret, not a ${VAR}
+)
+for p in "${patterns[@]}"; do
+  if echo "$staged" | grep -qE "$p"; then
+    echo "✗ Possible secret matching /$p/ in staged changes."
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo "Commit blocked. Override with 'git commit --no-verify' only if you are sure."
+  exit 1
+fi
