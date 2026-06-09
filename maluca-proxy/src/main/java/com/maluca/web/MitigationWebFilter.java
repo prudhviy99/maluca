@@ -6,8 +6,10 @@ import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 
+import com.maluca.challenge.ChallengeService;
 import com.maluca.config.MalucaProperties;
 import com.maluca.identity.ClientIdentityExtractor;
+import com.maluca.metrics.ChallengeMetrics;
 import com.maluca.metrics.MalucaMetrics;
 import com.maluca.mitigation.HysteresisService;
 import com.maluca.mitigation.MitigationExecutor;
@@ -48,6 +50,8 @@ public class MitigationWebFilter implements WebFilter, Ordered {
     private final HysteresisService hysteresis;
     private final MitigationExecutor executor;
     private final ProxyService proxyService;
+    private final ChallengeService challengeService;
+    private final ChallengeMetrics challengeMetrics;
     private final MalucaMetrics metrics;
     private final DecisionLogger decisionLogger;
     private final MalucaProperties properties;
@@ -62,6 +66,8 @@ public class MitigationWebFilter implements WebFilter, Ordered {
                                HysteresisService hysteresis,
                                MitigationExecutor executor,
                                ProxyService proxyService,
+                               ChallengeService challengeService,
+                               ChallengeMetrics challengeMetrics,
                                MalucaMetrics metrics,
                                DecisionLogger decisionLogger,
                                MalucaProperties properties) {
@@ -74,6 +80,8 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         this.hysteresis = hysteresis;
         this.executor = executor;
         this.proxyService = proxyService;
+        this.challengeService = challengeService;
+        this.challengeMetrics = challengeMetrics;
         this.metrics = metrics;
         this.decisionLogger = decisionLogger;
         this.properties = properties;
@@ -94,6 +102,14 @@ public class MitigationWebFilter implements WebFilter, Ordered {
 
         long startNanos = System.nanoTime();
         ClientIdentity identity = identityExtractor.extract(exchange);
+
+        // A valid signed pass cookie (issued on challenge success) bypasses
+        // the scorer entirely for its TTL — the client already proved itself.
+        if (hasValidPass(exchange, identity)) {
+            challengeMetrics.passBypass();
+            return proxyService.forward(exchange, identity);
+        }
+
         RequestMeta meta = RequestMeta.from(exchange.getRequest());
         boolean sensitive = isSensitive(path);
 
@@ -142,6 +158,11 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         return action == MitigationAction.HARD_LIMIT
                 ? properties.hysteresis().hardLimitTtlSeconds()
                 : 0;
+    }
+
+    private boolean hasValidPass(ServerWebExchange exchange, ClientIdentity identity) {
+        var cookie = exchange.getRequest().getCookies().getFirst("maluca_pass");
+        return cookie != null && challengeService.isValidPass(cookie.getValue(), identity.compositeKey());
     }
 
     private boolean isSensitive(String path) {

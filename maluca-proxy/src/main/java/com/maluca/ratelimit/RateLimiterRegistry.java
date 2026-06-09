@@ -18,7 +18,7 @@ import reactor.core.publisher.Mono;
  * primary {@link RateLimiter} so injection points that don't care about the
  * algorithm get config-driven dispatch for free.
  */
-@Component
+@Component("malucaRateLimiterRegistry") // explicit name: resilience4j autoconfigures its own "rateLimiterRegistry"
 @Primary
 public class RateLimiterRegistry implements RateLimiter {
 

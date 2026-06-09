@@ -19,6 +19,7 @@ public record MalucaProperties(
         Bands bands,
         Hysteresis hysteresis,
         Mitigation mitigation,
+        Challenge challenge,
         @DefaultValue("") List<String> sensitivePaths) {
 
     public record Upstream(
@@ -93,5 +94,19 @@ public record MalucaProperties(
 
     public record Mitigation(
             @DefaultValue("500") long softLimitDelayMs) {
+    }
+
+    /**
+     * Challenge subsystem. {@code secret} signs challenge tokens and pass
+     * cookies (HMAC — symmetric is right here: the only verifier is the
+     * issuer, so a digital signature would buy nothing and cost more CPU).
+     */
+    public record Challenge(
+            @DefaultValue("dev-only-secret-change-me") String secret,
+            @DefaultValue("120") long challengeTtlSeconds,
+            @DefaultValue("300") long passTtlSeconds,
+            @DefaultValue("16") int baseDifficultyBits,
+            @DefaultValue("22") int maxDifficultyBits,
+            @DefaultValue("82") int jsLiteMaxScore) {
     }
 }

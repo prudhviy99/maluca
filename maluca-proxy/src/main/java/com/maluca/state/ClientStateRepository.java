@@ -19,7 +19,7 @@ import reactor.core.publisher.Mono;
 @Repository
 public class ClientStateRepository {
 
-    static final String PREFIX = "maluca:";
+    public static final String PREFIX = "maluca:";
 
     @SuppressWarnings("rawtypes")
     private final RedisScript<List> collectStateScript = LuaScripts.listReturning("collect_state");

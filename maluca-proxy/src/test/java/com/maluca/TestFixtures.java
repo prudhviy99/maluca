@@ -26,6 +26,7 @@ public final class TestFixtures {
                 new MalucaProperties.Bands(30, 50, 65, 75, 90),
                 new MalucaProperties.Hysteresis(30, 120, 300),
                 new MalucaProperties.Mitigation(500),
+                new MalucaProperties.Challenge("test-secret", 120, 300, 16, 22, 82),
                 List.of("/login", "/admin", "/api/auth"));
     }
 }

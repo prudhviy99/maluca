@@ -83,6 +83,16 @@ maluca:
   mitigation:
     soft-limit-delay-ms: 500
 
+  # Challenge subsystem. The secret MUST come from the environment in any
+  # real deployment; the default exists only so local dev boots.
+  challenge:
+    secret: ${MALUCA_CHALLENGE_SECRET:dev-only-secret-change-me}
+    challenge-ttl-seconds: 120
+    pass-ttl-seconds: 300
+    base-difficulty-bits: 16
+    max-difficulty-bits: 22
+    js-lite-max-score: 82
+
   # Paths whose hit counts are tracked separately as a brute-force signal
   sensitive-paths:
     - /login
