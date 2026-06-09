@@ -1,6 +1,7 @@
 package com.maluca.config;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -20,7 +21,13 @@ public record MalucaProperties(
         Hysteresis hysteresis,
         Mitigation mitigation,
         Challenge challenge,
-        @DefaultValue("") List<String> sensitivePaths) {
+        @DefaultValue("") List<String> sensitivePaths,
+        /** External policy file; blank -> classpath:policies.yml (no hot reload). */
+        @DefaultValue("") String policyFile,
+        /** Token for /_maluca/admin/*; blank disables the admin API. */
+        @DefaultValue("") String adminToken,
+        /** API key -> tier map (stub for an auth-service lookup). */
+        @DefaultValue Map<String, String> tierKeys) {
 
     public record Upstream(
             String url,

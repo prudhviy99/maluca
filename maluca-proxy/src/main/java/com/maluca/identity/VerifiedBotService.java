@@ -71,6 +71,7 @@ public class VerifiedBotService {
     private final ReactiveStringRedisTemplate redis;
     private final DnsResolver resolver;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public VerifiedBotService(ReactiveStringRedisTemplate redis) {
         this(redis, JDK_RESOLVER);
     }

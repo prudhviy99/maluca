@@ -1,0 +1,65 @@
+# Maluca policies — most-specific route wins (/login beats /api/** beats /**).
+# Modes: ENFORCE (act) | OBSERVE (log, cap at observe) | DRY_RUN (tuning).
+# Omitted fields fall back to global application.yml defaults.
+#
+# This classpath copy is the no-config fallback. For hot reload, point
+# maluca.policy-file at a real file (compose mounts ./config/policies.yml).
+
+policies:
+
+  # Login: tiny exact limit, exact algorithm, strict bands, fail CLOSED —
+  # if Redis is down we would rather show a login error than admit a
+  # credential-stuffing burst unchecked.
+  - name: login
+    route: /login
+    mode: ENFORCE
+    rate-limit:
+      algorithm: SLIDING_WINDOW_LOG
+      limit: 5
+      window-seconds: 60
+    bands:
+      observe-min: 20
+      soft-limit-min: 35
+      hard-limit-min: 50
+      challenge-min: 60
+      block-min: 80
+    fail-mode: FAIL_CLOSED
+
+  # Health checks: generous and boring. Never challenge a load balancer.
+  - name: health
+    route: /health
+    mode: ENFORCE
+    rate-limit:
+      algorithm: FIXED_WINDOW
+      limit: 120
+      window-seconds: 10
+    bands:
+      observe-min: 95
+      soft-limit-min: 96
+      hard-limit-min: 97
+      challenge-min: 98
+      block-min: 99
+
+  # Checkout: token bucket — real buyers click in bursts.
+  - name: checkout
+    route: /api/checkout
+    mode: ENFORCE
+    rate-limit:
+      algorithm: TOKEN_BUCKET
+      rate-per-second: 1
+      burst: 5
+
+  # API surface: composite identity so IP-rotating scrapers still aggregate.
+  - name: api
+    route: /api/**
+    mode: ENFORCE
+    keying: COMPOSITE
+    rate-limit:
+      algorithm: SLIDING_WINDOW_COUNTER
+      limit: 60
+      window-seconds: 10
+
+  # Everything else: global defaults, baseline limiter.
+  - name: default
+    route: /**
+    mode: ENFORCE

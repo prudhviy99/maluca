@@ -19,12 +19,13 @@ public class DecisionLogger {
 
     private static final Logger log = LoggerFactory.getLogger("maluca.decision");
 
-    public void log(ClientIdentity identity, Decision decision, String path) {
-        log.info("decision {} {} {} {} {} {} {}",
+    public void log(ClientIdentity identity, Decision decision, String path, String policy) {
+        log.info("decision {} {} {} {} {} {} {} {}",
                 kv("client", identity.compositeKey()),
                 kv("action", decision.action().name()),
                 kv("score", decision.score()),
                 kv("path", path),
+                kv("policy", policy),
                 kv("reason", decision.reason()),
                 kv("dryRun", decision.dryRun()),
                 kv("signals", decision.contributions()));

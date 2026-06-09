@@ -41,10 +41,17 @@ public class ClientIdentityExtractor {
     }
 
     public ClientIdentity extract(ServerWebExchange exchange, RequestMeta meta) {
+        return extract(exchange, meta, null);
+    }
+
+    /** {@code strategyOverride} lets a policy choose its own keying (null = global default). */
+    public ClientIdentity extract(ServerWebExchange exchange, RequestMeta meta,
+                                  MalucaProperties.Identity.KeyStrategy strategyOverride) {
         ClientIdentity network = ClientIdentity.ofIp(resolveClientIp(exchange));
         String sessionKey = sessionKey(exchange);
         String fingerprintKey = fingerprintService.fingerprint(meta);
-        return network.withKeys(sessionKey, fingerprintKey, cfg.strategy());
+        return network.withKeys(sessionKey, fingerprintKey,
+                strategyOverride != null ? strategyOverride : cfg.strategy());
     }
 
     private String resolveClientIp(ServerWebExchange exchange) {

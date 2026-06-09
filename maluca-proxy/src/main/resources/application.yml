@@ -107,6 +107,18 @@ maluca:
     max-difficulty-bits: 22
     js-lite-max-score: 82
 
+  # Per-route policies. Point at a real file for hot reload; blank falls
+  # back to the classpath default (no reload).
+  policy-file: ${POLICY_FILE:}
+
+  # Guards /_maluca/admin/*. Blank disables the admin API entirely.
+  admin-token: ${MALUCA_ADMIN_TOKEN:}
+
+  # API-key -> tier stub (production: auth-service lookup behind a cache)
+  tier-keys:
+    demo-pro-key: pro
+    demo-enterprise-key: enterprise
+
   # Paths whose hit counts are tracked separately as a brute-force signal
   sensitive-paths:
     - /login

@@ -13,7 +13,6 @@ import com.maluca.identity.DatacenterDetector;
 import com.maluca.identity.UaClassifier;
 import com.maluca.identity.VerifiedBotService;
 import com.maluca.metrics.ChallengeMetrics;
-import com.maluca.model.UaClass;
 import com.maluca.metrics.MalucaMetrics;
 import com.maluca.mitigation.HysteresisService;
 import com.maluca.mitigation.MitigationExecutor;
@@ -27,6 +26,11 @@ import com.maluca.model.RateLimitConfig;
 import com.maluca.model.RequestMeta;
 import com.maluca.model.RiskSignals;
 import com.maluca.model.ScoreResult;
+import com.maluca.model.UaClass;
+import com.maluca.policy.ClientTierService;
+import com.maluca.policy.CompiledPolicy;
+import com.maluca.policy.PolicyDefinition;
+import com.maluca.policy.PolicyRegistry;
 import com.maluca.proxy.ProxyService;
 import com.maluca.ratelimit.RateLimiter;
 import com.maluca.scoring.Scorer;
@@ -38,7 +42,9 @@ import reactor.core.publisher.Mono;
 /**
  * The front door. Every external request flows through:
  *
- * <pre>identity → state (1 Redis trip) → rate limit → signals → score → band → hysteresis → execute</pre>
+ * <pre>tier → policy → identity (policy keying) → allow/denylist
+ *   → state (1 Redis trip) → rate limit (policy algorithm) → signals
+ *   → score → bands (policy) → hysteresis → mode (dry-run) → execute</pre>
  *
  * Maluca's own endpoints (/actuator, /_maluca) bypass the pipeline.
  */
@@ -49,11 +55,12 @@ public class MitigationWebFilter implements WebFilter, Ordered {
     private final UaClassifier uaClassifier;
     private final VerifiedBotService verifiedBotService;
     private final DatacenterDetector datacenterDetector;
+    private final ClientTierService tierService;
+    private final PolicyRegistry policyRegistry;
     private final ClientStateRepository stateRepository;
     private final RateLimiter rateLimiter;
     private final SignalsCollector signalsCollector;
     private final Scorer scorer;
-    private final PolicyResolver policyResolver;
     private final HysteresisService hysteresis;
     private final MitigationExecutor executor;
     private final ProxyService proxyService;
@@ -68,11 +75,12 @@ public class MitigationWebFilter implements WebFilter, Ordered {
                                UaClassifier uaClassifier,
                                VerifiedBotService verifiedBotService,
                                DatacenterDetector datacenterDetector,
+                               ClientTierService tierService,
+                               PolicyRegistry policyRegistry,
                                ClientStateRepository stateRepository,
                                RateLimiter rateLimiter,
                                SignalsCollector signalsCollector,
                                Scorer scorer,
-                               PolicyResolver policyResolver,
                                HysteresisService hysteresis,
                                MitigationExecutor executor,
                                ProxyService proxyService,
@@ -85,11 +93,12 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         this.uaClassifier = uaClassifier;
         this.verifiedBotService = verifiedBotService;
         this.datacenterDetector = datacenterDetector;
+        this.tierService = tierService;
+        this.policyRegistry = policyRegistry;
         this.stateRepository = stateRepository;
         this.rateLimiter = rateLimiter;
         this.signalsCollector = signalsCollector;
         this.scorer = scorer;
-        this.policyResolver = policyResolver;
         this.hysteresis = hysteresis;
         this.executor = executor;
         this.proxyService = proxyService;
@@ -115,7 +124,10 @@ public class MitigationWebFilter implements WebFilter, Ordered {
 
         long startNanos = System.nanoTime();
         RequestMeta meta = RequestMeta.from(exchange.getRequest());
-        ClientIdentity identity = identityExtractor.extract(exchange, meta);
+        String tier = tierService.tierOf(exchange.getRequest());
+        CompiledPolicy policy = policyRegistry.resolve(path, tier);
+        ClientIdentity identity = identityExtractor.extract(exchange, meta,
+                policy != null ? policy.keying() : null);
 
         // A valid signed pass cookie (issued on challenge success) bypasses
         // the scorer entirely for its TTL — the client already proved itself.
@@ -124,19 +136,37 @@ public class MitigationWebFilter implements WebFilter, Ordered {
             return proxyService.forward(exchange, identity);
         }
 
+        // Policy allowlist: trusted sources (internal nets, partners) skip everything.
+        if (policy != null && policy.allowlist().contains(identity.ip())) {
+            Decision allowed = Decision.of(MitigationAction.ALLOW, 0, "allowlist", java.util.Map.of());
+            return finish(exchange, identity, allowed, policy, path, startNanos);
+        }
+        // Policy denylist: immediate block, no scoring needed.
+        if (policy != null && policy.denylist().contains(identity.ip())) {
+            Decision denied = Decision.of(MitigationAction.BLOCK, 100, "denylist", java.util.Map.of());
+            denied = policy.isDryRun() ? denied.asDryRun() : denied;
+            return finish(exchange, identity, denied, policy, path, startNanos);
+        }
+
         boolean sensitive = isSensitive(path);
         boolean datacenter = datacenterDetector.isDatacenter(identity.ip());
 
         return resolveUaClass(meta, identity.ip())
                 .flatMap(uaClass -> stateRepository.collect(identity.compositeKey(), path, sensitive)
-                        .flatMap(state -> checkBaselineLimit(identity)
-                                .flatMap(limit -> decide(identity, meta, state, limit, uaClass, datacenter))))
-                .flatMap(decision -> {
-                    metrics.recordAddedLatency(System.nanoTime() - startNanos);
-                    metrics.recordDecision(decision.action());
-                    decisionLogger.log(identity, decision, path);
-                    return executor.execute(exchange, identity, decision);
-                });
+                        .flatMap(state -> checkLimit(identity, policy)
+                                .flatMap(limit -> decide(identity, meta, state, limit, uaClass,
+                                        datacenter, policy))))
+                .flatMap(decision -> finish(exchange, identity, decision, policy, path, startNanos));
+    }
+
+    private Mono<Void> finish(ServerWebExchange exchange, ClientIdentity identity,
+                              Decision decision, CompiledPolicy policy, String path, long startNanos) {
+        metrics.recordAddedLatency(System.nanoTime() - startNanos);
+        metrics.recordDecision(decision.action(),
+                policy != null ? policy.name() : "none",
+                policy != null ? policy.mode().name() : "ENFORCE");
+        decisionLogger.log(identity, decision, path, policy != null ? policy.name() : "none");
+        return executor.execute(exchange, identity, decision);
     }
 
     /**
@@ -153,20 +183,28 @@ public class MitigationWebFilter implements WebFilter, Ordered {
                 .map(verified -> verified ? UaClass.VERIFIED_BOT : UaClass.KNOWN_BAD_BOT);
     }
 
-    private Mono<LimitDecision> checkBaselineLimit(ClientIdentity identity) {
-        if (!properties.limits().enabled()) {
+    private Mono<LimitDecision> checkLimit(ClientIdentity identity, CompiledPolicy policy) {
+        RateLimitConfig config = policy != null && policy.rateLimit() != null
+                ? policy.rateLimit()
+                : (properties.limits().enabled() ? baselineLimit : null);
+        if (config == null) {
             return Mono.just(LimitDecision.allowedNoLimit());
         }
-        return rateLimiter.check(identity.compositeKey(), baselineLimit);
+        // key includes the policy so per-route limits don't share counters
+        String key = (policy != null ? policy.name() : "global") + ":" + identity.compositeKey();
+        return rateLimiter.check(key, config);
     }
 
     private Mono<Decision> decide(ClientIdentity identity, RequestMeta meta, ClientState state,
-                                  LimitDecision limit, UaClass uaClass, boolean datacenter) {
+                                  LimitDecision limit, UaClass uaClass, boolean datacenter,
+                                  CompiledPolicy policy) {
         RiskSignals signals = signalsCollector.collect(meta, state, uaClass, datacenter, !limit.allowed());
         ScoreResult score = scorer.score(signals);
 
-        MitigationAction scored = policyResolver.resolve(score.score());
-        // A breached baseline limit floors the action at HARD_LIMIT regardless of score.
+        MalucaProperties.Bands bands = policy != null && policy.bands() != null
+                ? policy.bands() : properties.bands();
+        MitigationAction scored = PolicyResolver.resolve(score.score(), bands);
+        // A breached rate limit floors the action at HARD_LIMIT regardless of score.
         if (!limit.allowed() && MitigationAction.HARD_LIMIT.isAtLeastAsSevereAs(scored)) {
             scored = MitigationAction.HARD_LIMIT;
         }
@@ -179,7 +217,15 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         Decision decision = Decision.of(effective, score.score(), reason, score.contributions())
                 .withRetryAfter(limit.allowed() ? retryAfterFromHysteresis(effective) : limit.retryAfterSeconds());
 
-        return hysteresis.maybePin(identity.compositeKey(), scored)
+        // OBSERVE/DRY_RUN modes: full pipeline runs (including hysteresis
+        // pinning, so flipping to ENFORCE later behaves identically), but the
+        // executed action is pass-through.
+        if (policy != null && policy.mode() != PolicyDefinition.Mode.ENFORCE) {
+            decision = decision.asDryRun();
+        }
+
+        MitigationAction toPin = scored;
+        return hysteresis.maybePin(identity.compositeKey(), toPin)
                 .thenReturn(decision);
     }
 

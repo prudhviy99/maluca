@@ -1,13 +1,9 @@
 package com.maluca.identity;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.List;
-
 import org.springframework.stereotype.Component;
 
 import com.maluca.config.MalucaProperties;
+import com.maluca.util.CidrSet;
 
 /**
  * Flags requests originating from datacenter/cloud IP space. Real users
@@ -20,50 +16,13 @@ import com.maluca.config.MalucaProperties;
 @Component
 public class DatacenterDetector {
 
-    private record Cidr(byte[] network, int prefixBits) {
-        boolean contains(byte[] address) {
-            if (address.length != network.length) {
-                return false;
-            }
-            int fullBytes = prefixBits / 8;
-            for (int i = 0; i < fullBytes; i++) {
-                if (address[i] != network[i]) {
-                    return false;
-                }
-            }
-            int remainder = prefixBits % 8;
-            if (remainder == 0 || fullBytes >= network.length) {
-                return true;
-            }
-            int mask = 0xFF << (8 - remainder);
-            return (address[fullBytes] & mask) == (network[fullBytes] & mask);
-        }
-    }
-
-    private final List<Cidr> cidrs = new ArrayList<>();
+    private final CidrSet cidrs;
 
     public DatacenterDetector(MalucaProperties properties) {
-        for (String spec : properties.identity().datacenterCidrs()) {
-            try {
-                String[] parts = spec.trim().split("/");
-                byte[] network = InetAddress.getByName(parts[0]).getAddress();
-                int bits = parts.length > 1 ? Integer.parseInt(parts[1]) : network.length * 8;
-                cidrs.add(new Cidr(network, bits));
-            } catch (UnknownHostException | NumberFormatException | ArrayIndexOutOfBoundsException e) {
-                throw new IllegalArgumentException("Bad datacenter CIDR: " + spec, e);
-            }
-        }
+        this.cidrs = CidrSet.of(properties.identity().datacenterCidrs());
     }
 
     public boolean isDatacenter(String ip) {
-        if (cidrs.isEmpty()) {
-            return false;
-        }
-        try {
-            byte[] address = InetAddress.getByName(ip).getAddress();
-            return cidrs.stream().anyMatch(c -> c.contains(address));
-        } catch (UnknownHostException e) {
-            return false;
-        }
+        return cidrs.contains(ip);
     }
 }
