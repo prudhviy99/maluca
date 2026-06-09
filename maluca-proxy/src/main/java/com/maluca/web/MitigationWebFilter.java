@@ -14,6 +14,9 @@ import com.maluca.identity.UaClassifier;
 import com.maluca.identity.VerifiedBotService;
 import com.maluca.metrics.ChallengeMetrics;
 import com.maluca.metrics.MalucaMetrics;
+import com.maluca.metrics.Observed;
+
+import io.micrometer.observation.ObservationRegistry;
 import com.maluca.mitigation.HysteresisService;
 import com.maluca.mitigation.MitigationExecutor;
 import com.maluca.mitigation.PolicyResolver;
@@ -69,6 +72,7 @@ public class MitigationWebFilter implements WebFilter, Ordered {
     private final MalucaMetrics metrics;
     private final DecisionLogger decisionLogger;
     private final MalucaProperties properties;
+    private final ObservationRegistry observations;
     private final RateLimitConfig baselineLimit;
 
     public MitigationWebFilter(ClientIdentityExtractor identityExtractor,
@@ -88,7 +92,8 @@ public class MitigationWebFilter implements WebFilter, Ordered {
                                ChallengeMetrics challengeMetrics,
                                MalucaMetrics metrics,
                                DecisionLogger decisionLogger,
-                               MalucaProperties properties) {
+                               MalucaProperties properties,
+                               ObservationRegistry observations) {
         this.identityExtractor = identityExtractor;
         this.uaClassifier = uaClassifier;
         this.verifiedBotService = verifiedBotService;
@@ -107,6 +112,7 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         this.metrics = metrics;
         this.decisionLogger = decisionLogger;
         this.properties = properties;
+        this.observations = observations;
         this.baselineLimit = properties.limits().toConfig();
     }
 
@@ -152,8 +158,10 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         boolean datacenter = datacenterDetector.isDatacenter(identity.ip());
 
         return resolveUaClass(meta, identity.ip())
-                .flatMap(uaClass -> stateRepository.collect(identity.compositeKey(), path, sensitive)
-                        .flatMap(state -> checkLimit(identity, policy)
+                .flatMap(uaClass -> Observed.mono(observations, "maluca.state",
+                                stateRepository.collect(identity.compositeKey(), path, sensitive))
+                        .flatMap(state -> Observed.mono(observations, "maluca.ratelimit",
+                                        checkLimit(identity, policy))
                                 .flatMap(limit -> decide(identity, meta, state, limit, uaClass,
                                         datacenter, policy))))
                 .flatMap(decision -> finish(exchange, identity, decision, policy, path, startNanos));

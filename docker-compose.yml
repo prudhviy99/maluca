@@ -71,6 +71,7 @@ services:
       - "9090:9090"
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/alerts.yml:/etc/prometheus/alerts.yml:ro
     networks:
       - maluca-net
     profiles:

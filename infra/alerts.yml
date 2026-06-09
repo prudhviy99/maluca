@@ -1,0 +1,53 @@
+# Prometheus alert rules wired to the SLOs in docs/slos.md.
+groups:
+  - name: maluca-slos
+    rules:
+      - alert: MalucaAddedLatencyP99High
+        expr: >
+          histogram_quantile(0.99,
+            sum by (le) (rate(maluca_added_latency_seconds_bucket[5m]))) > 0.005
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Maluca p99 added latency above 5ms SLO"
+          description: "Decision-path overhead p99 has exceeded 5ms for 10 minutes. Check the maluca.state / maluca.ratelimit sub-spans in Jaeger — it is almost always Redis."
+
+      - alert: MalucaRedisErrors
+        expr: rate(maluca_redis_errors_total[1m]) > 0.1
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Maluca cannot reach Redis"
+          description: "Redis errors on the decision path. Maluca degrades per fail-mode policy; verify which routes are failing open vs closed."
+
+      - alert: MalucaUpstreamErrors
+        expr: rate(maluca_upstream_errors_total[1m]) > 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Upstream returning errors through Maluca"
+
+      - alert: MalucaBlockRateAnomaly
+        expr: >
+          sum(rate(maluca_decisions_total{action=~"BLOCK|HARD_LIMIT"}[5m]))
+            / sum(rate(maluca_decisions_total[5m])) > 0.3
+        for: 15m
+        labels:
+          severity: warn
+        annotations:
+          summary: "More than 30% of traffic is being blocked/limited"
+          description: "Either an attack is in progress (good — verify and let it ride) or a threshold change is over-blocking (bad — check recent policy reloads and the dry-run panel)."
+
+      - alert: MalucaChallengeSolveRateLow
+        expr: >
+          sum(rate(maluca_challenges_total{event="solved"}[30m]))
+            / sum(rate(maluca_challenges_total{event="issued"}[30m])) < 0.05
+        for: 30m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Under 5% of issued challenges get solved"
+          description: "Either challenges only hit bots (fine) or real users are stuck on a broken challenge page (not fine). Sample challenged clients in the decision log."

@@ -18,6 +18,14 @@ management:
   endpoint:
     health:
       show-details: always
+  tracing:
+    sampling:
+      # 10% default; turn up for debugging, down under heavy load
+      probability: ${TRACE_SAMPLING:0.1}
+  otlp:
+    tracing:
+      # Jaeger's OTLP HTTP ingest (run via: docker compose --profile observability up)
+      endpoint: ${OTLP_ENDPOINT:http://localhost:4318/v1/traces}
 
 # ─── Maluca configuration ─────────────────────────────────────────────────────
 maluca:
@@ -133,3 +141,5 @@ logging:
   level:
     root: INFO
     com.maluca: DEBUG
+  pattern:
+    correlation: "[%X{traceId:-},%X{spanId:-}] "

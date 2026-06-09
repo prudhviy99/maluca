@@ -5,7 +5,7 @@
     <springProfile name="!json-logging">
         <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
             <encoder>
-                <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{24} - %msg%n</pattern>
+                <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] [%X{traceId:-}] %logger{24} - %msg%n</pattern>
             </encoder>
         </appender>
         <root level="INFO">

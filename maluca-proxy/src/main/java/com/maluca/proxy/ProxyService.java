@@ -18,9 +18,11 @@ import org.springframework.web.server.ServerWebExchange;
 
 import com.maluca.config.MalucaProperties;
 import com.maluca.metrics.MalucaMetrics;
+import com.maluca.metrics.Observed;
 import com.maluca.model.ClientIdentity;
 import com.maluca.state.ClientStateRepository;
 
+import io.micrometer.observation.ObservationRegistry;
 import reactor.core.publisher.Mono;
 
 /**
@@ -42,18 +44,25 @@ public class ProxyService {
     private final URI upstreamBase;
     private final MalucaMetrics metrics;
     private final ClientStateRepository stateRepository;
+    private final ObservationRegistry observations;
 
     public ProxyService(WebClient upstreamWebClient,
                         MalucaProperties properties,
                         MalucaMetrics metrics,
-                        ClientStateRepository stateRepository) {
+                        ClientStateRepository stateRepository,
+                        ObservationRegistry observations) {
         this.webClient = upstreamWebClient;
         this.upstreamBase = URI.create(properties.upstream().url());
         this.metrics = metrics;
         this.stateRepository = stateRepository;
+        this.observations = observations;
     }
 
     public Mono<Void> forward(ServerWebExchange exchange, ClientIdentity identity) {
+        return Observed.mono(observations, "maluca.upstream", doForward(exchange, identity));
+    }
+
+    private Mono<Void> doForward(ServerWebExchange exchange, ClientIdentity identity) {
         ServerHttpRequest request = exchange.getRequest();
         ServerHttpResponse response = exchange.getResponse();
 

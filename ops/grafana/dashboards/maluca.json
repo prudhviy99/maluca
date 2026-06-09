@@ -1,0 +1,85 @@
+{
+  "uid": "maluca-main",
+  "title": "Maluca — Mitigation Proxy",
+  "tags": ["maluca"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Requests/s by decision",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [{
+        "expr": "sum by (action) (rate(maluca_decisions_total[1m]))",
+        "legendFormat": "{{action}}"
+      }]
+    },
+    {
+      "id": 2, "type": "piechart", "title": "Decision breakdown (15m)",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "targets": [{
+        "expr": "sum by (action) (increase(maluca_decisions_total[15m]))",
+        "legendFormat": "{{action}}"
+      }]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Total rps",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [{ "expr": "sum(rate(maluca_decisions_total[1m]))" }]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Added latency (decision overhead)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(maluca_added_latency_seconds_bucket[1m])))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(maluca_added_latency_seconds_bucket[1m])))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(maluca_added_latency_seconds_bucket[1m])))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Upstream latency",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(maluca_upstream_latency_seconds_bucket[1m])))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(maluca_upstream_latency_seconds_bucket[1m])))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Top routes by non-allow rate",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [{
+        "expr": "topk(10, sum by (route) (rate(maluca_route_decisions_total{action!~\"ALLOW|OBSERVE\"}[5m])))",
+        "legendFormat": "{{route}}"
+      }]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Challenge funnel",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "sum by (event) (rate(maluca_challenges_total[5m]))", "legendFormat": "{{event}}" },
+        { "expr": "rate(maluca_pass_bypass_total[5m])", "legendFormat": "pass_bypass" }
+      ]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Dry-run: would-have-acted (tuning)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [{
+        "expr": "sum by (route, action) (rate(maluca_route_decisions_total{mode=\"DRY_RUN\",action!~\"ALLOW|OBSERVE\"}[5m]))",
+        "legendFormat": "{{route}}/{{action}}"
+      }]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Errors (redis / upstream)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "expr": "rate(maluca_redis_errors_total[1m])", "legendFormat": "redis" },
+        { "expr": "rate(maluca_upstream_errors_total[1m])", "legendFormat": "upstream" }
+      ]
+    }
+  ]
+}
