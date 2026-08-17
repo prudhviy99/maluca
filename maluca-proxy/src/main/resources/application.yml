@@ -40,6 +40,22 @@ management:
 # ─── Maluca configuration ─────────────────────────────────────────────────────
 maluca:
 
+  # Lossy, bounded export of mitigation decisions to the optional triage
+  # control plane. It is off unless explicitly enabled, so proxy availability
+  # never depends on PostgreSQL, Ollama, or the triage service.
+  decision-sink:
+    enabled: ${MALUCA_DECISION_SINK_ENABLED:false}
+    endpoint: ${MALUCA_DECISION_SINK_ENDPOINT:http://localhost:8082/internal/v1/decisions}
+    auth-header: X-Maluca-Internal-Token
+    auth-token: ${MALUCA_INTERNAL_TOKEN:}
+    queue-capacity: 10000
+    batch-size: 500
+    flush-interval: 1s
+    request-timeout: 3s
+    initial-backoff: 250ms
+    max-backoff: 30s
+    shutdown-timeout: 5s
+
   # Where allowed traffic is forwarded
   upstream:
     url: ${UPSTREAM_URL:http://localhost:8081}
@@ -51,7 +67,9 @@ maluca:
   # strategy: NETWORK (IP only) | COMPOSITE (ip|session|fingerprint) | FINGERPRINT
   identity:
     trust-x-forwarded-for: ${TRUST_XFF:false}
-    trusted-proxies: []
+    # Comma-separated exact peer IPs. XFF remains ignored unless TRUST_XFF is
+    # also true; never populate this with client address ranges.
+    trusted-proxies: ${TRUSTED_PROXIES:}
     strategy: ${IDENTITY_STRATEGY:NETWORK}
     session-cookie: session
     # Cloud/datacenter ranges that bump score and PoW difficulty.

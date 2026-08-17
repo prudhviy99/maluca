@@ -4,6 +4,9 @@
 Spring WebFlux and Redis. Maluca sits in front of a backend, scores every
 request on a 0–100 risk scale from layered behavioral signals, and chooses
 from six progressive mitigation actions via a hot-reloadable policy engine.
+Its optional local-AI control plane detects incidents, retrieves cited
+runbooks from PostgreSQL/pgvector, generates grounded reports with Ollama,
+and exposes bounded operational tools over MCP.
 
 > Maluca scores every incoming request on a 0–100 risk scale using layered
 > behavioral signals, chooses from six progressive mitigation actions
@@ -51,6 +54,39 @@ docker compose -f docker-compose.yml -f docker-compose.multi.yml \
   up redis demo-backend maluca-proxy-1 maluca-proxy-2 lb
 ```
 
+## Run the AI incident-triage stack
+
+Copy [`.env.example`](.env.example) to `.env`, replace every development
+secret, then start the opt-in overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.triage.yml \
+  --profile triage up --build
+```
+
+This adds pgvector PostgreSQL, Ollama, a one-shot model pull, the triage API
+on **http://localhost:8082**, the Streamable-HTTP MCP server on
+**http://localhost:8083/mcp**, and Prometheus. The default first run downloads
+`qwen3:14b` and `nomic-embed-text`; model data is retained in a named volume.
+To use Gemma instead, set `OLLAMA_CHAT_MODEL=gemma4:e4b` in `.env` before
+starting the overlay.
+For NVIDIA acceleration, add `-f docker-compose.gpu.yml` before
+`--profile triage`.
+
+```bash
+# inspect detected incidents
+curl -H "Authorization: Bearer $TRIAGE_API_TOKEN" \
+  http://localhost:8082/api/v1/incidents
+
+# retrieve a report as Markdown
+curl -H "Authorization: Bearer $TRIAGE_API_TOKEN" \
+  http://localhost:8082/api/v1/incidents/INCIDENT_ID/report.md
+```
+
+Policy changes are proposals by default. Application is disabled unless both
+the triage and MCP apply switches are explicitly enabled, and it requires a
+separate human/operator credential plus optimistic incident and file hashes.
+
 ## Try the attack simulators
 
 ```bash
@@ -95,20 +131,38 @@ instead of erroring.
 | Hot-reloadable per-route policy engine + admin API | `policy/` |
 | Metrics, OpenTelemetry traces, structured decision logs | `metrics/`, `web/DecisionLogger` |
 | Redis circuit breaker + graceful degradation tiers | `state/RedisCircuitBreaker` |
+| Shared proxy/triage/MCP wire contracts | `maluca-contracts/` |
+| Deterministic incident detection + lifecycle | `maluca-triage/detection/`, `incident/` |
+| pgvector runbook RAG + local Ollama structured reports | `maluca-triage/runbook/`, `agent/` |
+| Audited, CAS-guarded policy proposal/apply workflow | `maluca-triage/policy/` |
+| Streamable-HTTP MCP operational tools | `maluca-mcp/` |
+| Offline and opt-in model regression evaluations | `maluca-triage/src/test/` |
 
 ## Documentation
 
+- [`docs/beginner-guide.md`](docs/beginner-guide.md) — complete beginner walkthrough of the proxy and AI control plane: Java/Spring concepts, HLD, LLD, RAG, Ollama, pgvector, MCP, safety boundaries, tests, and end-to-end code flow
+- [`docs/triage-project-guide.md`](docs/triage-project-guide.md) — complete as-built AI triage guide, startup, APIs, flows, safety, testing, and operations
+- [`docs/triage-implementation-plan.md`](docs/triage-implementation-plan.md) — completed delivery plan and acceptance boundaries
+- [`docs/triage/architecture.md`](docs/triage/architecture.md) — component and runtime architecture
+- [`docs/triage/configuration.md`](docs/triage/configuration.md) — environment variables, defaults, timing constraints, and deployment profiles
+- [`docs/triage/data-model.md`](docs/triage/data-model.md) — PostgreSQL schema, lifecycle state, leases, hashes, and audit records
+- [`docs/triage/evaluation.md`](docs/triage/evaluation.md) — deterministic, retrieval, safety, and live-Ollama evaluation strategy and results
+- [`docs/triage/security.md`](docs/triage/security.md) — trust boundaries, credentials, and remediation controls
+- [`maluca-triage/README.md`](maluca-triage/README.md) — triage service developer reference
+- [`maluca-mcp/README.md`](maluca-mcp/README.md) — MCP clients, tool contracts, and authorization
 - [`docs/algorithms.md`](docs/algorithms.md) — the five rate limiters, with trade-offs
 - [`docs/benchmarks.md`](docs/benchmarks.md) — measured latency + mitigation effectiveness (and where it loses)
 - [`docs/slos.md`](docs/slos.md) — SLIs/SLOs, golden signals, cardinality rules
 - [`ops/RUNBOOK.md`](ops/RUNBOOK.md) — operating Maluca when things go wrong
+- [`ops/TRIAGE_RUNBOOK.md`](ops/TRIAGE_RUNBOOK.md) — operating and recovering the AI incident control plane
 
 ## Build & test locally (without Docker)
 
 Needs JDK 21 and a local Redis on :6379.
 
 ```bash
-./gradlew test                       # 77 tests; Redis-backed + Testcontainers tests self-skip if unavailable
+./gradlew test                       # deterministic suite; Docker-backed tests self-skip if unavailable
+./gradlew :maluca-triage:llmTest     # opt-in; requires the configured Ollama models
 ./gradlew :demo-backend:bootRun &    # backend on :8081
 ./gradlew :maluca-proxy:bootRun      # proxy on :8080
 ```
@@ -124,7 +178,9 @@ never commit them; a pre-commit hook in `scripts/git-hooks/` blocks accidents.
 
 ## Status
 
-Phases 0–10 of the master plan are implemented: proxy core, scoring,
-five rate limiters, challenges, composite identity, policy engine,
-observability, attack/benchmark harness, resilience, and production
-packaging. The ML/behavioral expansions (Phase F) are future work.
+The mitigation proxy and optional AI incident-triage control plane are both
+implemented. The control plane includes decision export, deterministic anomaly
+detection, pgvector RAG, source-cited local inference, MCP tools, guarded policy
+remediation, migrations, Compose packaging, runbooks, and regression tests.
+The proxy remains independently deployable because decision export is disabled
+by default and never blocks request processing.

@@ -6,6 +6,9 @@ COPY gradlew settings.gradle build.gradle ./
 COPY gradle ./gradle
 COPY maluca-proxy/build.gradle maluca-proxy/build.gradle
 COPY demo-backend/build.gradle demo-backend/build.gradle
+COPY maluca-contracts/build.gradle maluca-contracts/build.gradle
+COPY maluca-triage/build.gradle maluca-triage/build.gradle
+COPY maluca-mcp/build.gradle maluca-mcp/build.gradle
 RUN ./gradlew :demo-backend:dependencies --no-daemon -q > /dev/null 2>&1 || true
 
 COPY demo-backend/src demo-backend/src

@@ -1,5 +1,6 @@
 package com.maluca.policy;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.maluca.config.MalucaProperties;
+import com.maluca.model.RateLimitConfig;
 
 import reactor.core.publisher.Mono;
 
@@ -42,13 +44,7 @@ public class PolicyAdminController {
             return Mono.just(deny());
         }
         List<Map<String, Object>> policies = registry.snapshot().stream()
-                .<Map<String, Object>>map(p -> Map.of(
-                        "name", p.name(),
-                        "route", p.pattern().getPatternString(),
-                        "mode", p.mode().name(),
-                        "tiers", p.tiers(),
-                        "rateLimit", p.rateLimit() == null ? "global-default" : p.rateLimit().toString(),
-                        "failMode", p.failMode().name()))
+                .map(PolicyAdminController::describe)
                 .toList();
         return Mono.just(ResponseEntity.ok(Map.of("policies", policies)));
     }
@@ -66,6 +62,46 @@ public class PolicyAdminController {
 
     private boolean unauthorized(String token) {
         return adminToken == null || adminToken.isBlank() || !adminToken.equals(token);
+    }
+
+    private static Map<String, Object> describe(CompiledPolicy policy) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("name", policy.name());
+        view.put("route", policy.pattern().getPatternString());
+        view.put("mode", policy.mode().name());
+        view.put("tiers", policy.tiers());
+        view.put("keying", policy.keying() == null ? null : policy.keying().name());
+        view.put("bands", describeBands(policy.bands()));
+        view.put("rateLimit", describeRateLimit(policy.rateLimit()));
+        view.put("allowlist", policy.allowlist().specs());
+        view.put("denylist", policy.denylist().specs());
+        view.put("failMode", policy.failMode().name());
+        return view;
+    }
+
+    private static Map<String, Object> describeBands(MalucaProperties.Bands bands) {
+        if (bands == null) {
+            return Map.of();
+        }
+        return Map.of(
+                "observeMin", bands.observeMin(),
+                "softLimitMin", bands.softLimitMin(),
+                "hardLimitMin", bands.hardLimitMin(),
+                "challengeMin", bands.challengeMin(),
+                "blockMin", bands.blockMin());
+    }
+
+    private static Map<String, Object> describeRateLimit(RateLimitConfig rateLimit) {
+        if (rateLimit == null) {
+            return Map.of();
+        }
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("algorithm", rateLimit.algorithm() == null ? null : rateLimit.algorithm().name());
+        view.put("limit", rateLimit.limit());
+        view.put("windowSeconds", rateLimit.windowSeconds());
+        view.put("ratePerSecond", rateLimit.ratePerSecond());
+        view.put("burst", rateLimit.burst());
+        return view;
     }
 
     private static ResponseEntity<Object> deny() {

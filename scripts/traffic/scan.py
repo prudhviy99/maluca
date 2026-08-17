@@ -9,6 +9,8 @@ WORDLIST = [
     "/admin", "/.env", "/wp-login.php", "/config.json", "/backup.zip",
     "/api/v1/users", "/api/internal", "/.git/config", "/phpmyadmin",
     "/server-status", "/actuator/env", "/debug", "/console", "/.aws/credentials",
+    "/vendor/phpunit", "/graphql", "/swagger-ui", "/openapi.json",
+    "/jenkins", "/solr/admin", "/elasticsearch", "/cgi-bin/status",
 ]
 
 

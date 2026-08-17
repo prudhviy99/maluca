@@ -1,5 +1,7 @@
 package com.maluca.web;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
@@ -34,7 +36,6 @@ import com.maluca.policy.ClientTierService;
 import com.maluca.policy.CompiledPolicy;
 import com.maluca.policy.PolicyDefinition;
 import com.maluca.policy.PolicyRegistry;
-import com.maluca.proxy.ProxyService;
 import com.maluca.ratelimit.RateLimiter;
 import com.maluca.scoring.Scorer;
 import com.maluca.scoring.SignalsCollector;
@@ -55,6 +56,8 @@ import reactor.core.publisher.Mono;
 @Component
 public class MitigationWebFilter implements WebFilter, Ordered {
 
+    private static final Logger log = LoggerFactory.getLogger(MitigationWebFilter.class);
+
     private final ClientIdentityExtractor identityExtractor;
     private final UaClassifier uaClassifier;
     private final VerifiedBotService verifiedBotService;
@@ -68,11 +71,12 @@ public class MitigationWebFilter implements WebFilter, Ordered {
     private final Scorer scorer;
     private final HysteresisService hysteresis;
     private final MitigationExecutor executor;
-    private final ProxyService proxyService;
     private final ChallengeService challengeService;
     private final ChallengeMetrics challengeMetrics;
     private final MalucaMetrics metrics;
     private final DecisionLogger decisionLogger;
+    private final DecisionEventFactory decisionEventFactory;
+    private final DecisionSink decisionSink;
     private final MalucaProperties properties;
     private final ObservationRegistry observations;
     private final RateLimitConfig baselineLimit;
@@ -90,11 +94,12 @@ public class MitigationWebFilter implements WebFilter, Ordered {
                                Scorer scorer,
                                HysteresisService hysteresis,
                                MitigationExecutor executor,
-                               ProxyService proxyService,
                                ChallengeService challengeService,
                                ChallengeMetrics challengeMetrics,
                                MalucaMetrics metrics,
                                DecisionLogger decisionLogger,
+                               DecisionEventFactory decisionEventFactory,
+                               DecisionSink decisionSink,
                                MalucaProperties properties,
                                ObservationRegistry observations) {
         this.identityExtractor = identityExtractor;
@@ -110,11 +115,12 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         this.scorer = scorer;
         this.hysteresis = hysteresis;
         this.executor = executor;
-        this.proxyService = proxyService;
         this.challengeService = challengeService;
         this.challengeMetrics = challengeMetrics;
         this.metrics = metrics;
         this.decisionLogger = decisionLogger;
+        this.decisionEventFactory = decisionEventFactory;
+        this.decisionSink = decisionSink;
         this.properties = properties;
         this.observations = observations;
         this.baselineLimit = properties.limits().toConfig();
@@ -143,25 +149,27 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         // the scorer entirely for its TTL — the client already proved itself.
         if (hasValidPass(exchange, identity)) {
             challengeMetrics.passBypass();
-            return proxyService.forward(exchange, identity);
+            Decision allowed = Decision.of(MitigationAction.ALLOW, 0,
+                    "pass_cookie_bypass", java.util.Map.of());
+            return finish(exchange, identity, allowed, policy, tier, path, startNanos);
         }
 
         // Policy allowlist: trusted sources (internal nets, partners) skip everything.
         if (policy != null && policy.allowlist().contains(identity.ip())) {
             Decision allowed = Decision.of(MitigationAction.ALLOW, 0, "allowlist", java.util.Map.of());
-            return finish(exchange, identity, allowed, policy, path, startNanos);
+            return finish(exchange, identity, allowed, policy, tier, path, startNanos);
         }
         // Policy denylist: immediate block, no scoring needed.
         if (policy != null && policy.denylist().contains(identity.ip())) {
             Decision denied = Decision.of(MitigationAction.BLOCK, 100, "denylist", java.util.Map.of());
-            denied = policy.isDryRun() ? denied.asDryRun() : denied;
-            return finish(exchange, identity, denied, policy, path, startNanos);
+            denied = suppressOutsideEnforce(denied, policy);
+            return finish(exchange, identity, denied, policy, tier, path, startNanos);
         }
 
         // Redis open-circuit: skip the whole stateful pipeline and apply the
         // route's fail-mode immediately (degradation tier PASSTHROUGH/closed).
         if (!stateRepository.redisHealthy()) {
-            return finish(exchange, identity, degradedDecision(policy), policy, path, startNanos);
+            return finish(exchange, identity, degradedDecision(policy), policy, tier, path, startNanos);
         }
 
         boolean sensitive = isSensitive(path);
@@ -174,16 +182,27 @@ public class MitigationWebFilter implements WebFilter, Ordered {
                                         checkLimit(identity, policy))
                                 .flatMap(limit -> decide(identity, meta, state, limit, uaClass,
                                         datacenter, policy))))
-                .flatMap(decision -> finish(exchange, identity, decision, policy, path, startNanos));
+                .flatMap(decision -> finish(exchange, identity, decision, policy, tier, path, startNanos));
     }
 
     private Mono<Void> finish(ServerWebExchange exchange, ClientIdentity identity,
-                              Decision decision, CompiledPolicy policy, String path, long startNanos) {
+                              Decision decision, CompiledPolicy policy, String tier,
+                              String path, long startNanos) {
         metrics.recordAddedLatency(System.nanoTime() - startNanos);
         metrics.recordDecision(decision.action(),
                 policy != null ? policy.name() : "none",
                 policy != null ? policy.mode().name() : "ENFORCE");
         decisionLogger.log(identity, decision, path, policy != null ? policy.name() : "none");
+        if (decisionSink.isEnabled()) {
+            try {
+                decisionSink.offer(decisionEventFactory.create(
+                        exchange, identity, decision, policy, tier, path));
+            } catch (RuntimeException e) {
+                // Decision export is observability/control-plane traffic. It must
+                // never alter the response chosen by the mitigation pipeline.
+                log.warn("decision_sink_offer_failed error={}", e.toString());
+            }
+        }
         return executor.execute(exchange, identity, decision);
     }
 
@@ -225,8 +244,9 @@ public class MitigationWebFilter implements WebFilter, Ordered {
                 ? policy.failMode() == PolicyDefinition.FailMode.FAIL_CLOSED
                 : !properties.resilience().failOpenByDefault();
         MitigationAction action = failClosed ? MitigationAction.BLOCK : MitigationAction.ALLOW;
-        return Decision.of(action, failClosed ? 100 : 0,
+        Decision decision = Decision.of(action, failClosed ? 100 : 0,
                 "redis_down_fail_" + (failClosed ? "closed" : "open"), java.util.Map.of());
+        return suppressOutsideEnforce(decision, policy);
     }
 
     private Mono<Decision> decide(ClientIdentity identity, RequestMeta meta, ClientState state,
@@ -254,9 +274,7 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         // OBSERVE/DRY_RUN modes: full pipeline runs (including hysteresis
         // pinning, so flipping to ENFORCE later behaves identically), but the
         // executed action is pass-through.
-        if (policy != null && policy.mode() != PolicyDefinition.Mode.ENFORCE) {
-            decision = decision.asDryRun();
-        }
+        decision = suppressOutsideEnforce(decision, policy);
 
         MitigationAction toPin = scored;
         return hysteresis.maybePin(identity.compositeKey(), toPin)
@@ -267,6 +285,12 @@ public class MitigationWebFilter implements WebFilter, Ordered {
         return action == MitigationAction.HARD_LIMIT
                 ? properties.hysteresis().hardLimitTtlSeconds()
                 : 0;
+    }
+
+    private static Decision suppressOutsideEnforce(Decision decision, CompiledPolicy policy) {
+        return policy != null && policy.mode() != PolicyDefinition.Mode.ENFORCE
+                ? decision.asDryRun()
+                : decision;
     }
 
     private boolean hasValidPass(ServerWebExchange exchange, ClientIdentity identity) {

@@ -1,7 +1,11 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.5.3' apply false
+    id 'org.springframework.boot' version '3.5.15' apply false
     id 'io.spring.dependency-management' version '1.1.7' apply false
+}
+
+ext {
+    springAiVersion = '1.1.8'
 }
 
 subprojects {
@@ -23,7 +27,8 @@ subprojects {
 
     dependencyManagement {
         imports {
-            mavenBom "org.springframework.boot:spring-boot-dependencies:3.5.3"
+            mavenBom "org.springframework.boot:spring-boot-dependencies:3.5.15"
+            mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
         }
     }
 
@@ -31,8 +36,12 @@ subprojects {
         options.encoding = 'UTF-8'
     }
 
-    tasks.withType(Test).configureEach {
-        useJUnitPlatform()
+    tasks.withType(Test).configureEach { testTask ->
+        useJUnitPlatform {
+            if (testTask.name != 'llmTest') {
+                excludeTags 'llm'
+            }
+        }
         testLogging {
             events 'failed', 'skipped'
             exceptionFormat 'full'

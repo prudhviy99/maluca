@@ -9,6 +9,7 @@ import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -48,6 +49,8 @@ import jakarta.annotation.PreDestroy;
 public class PolicyRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(PolicyRegistry.class);
+    private static final int MAX_POLICY_NAME_LENGTH = 128;
+    private static final int MAX_POLICY_ROUTE_LENGTH = 512;
 
     private final YAMLMapper yaml = (YAMLMapper) new YAMLMapper()
             .setPropertyNamingStrategy(PropertyNamingStrategies.KEBAB_CASE);
@@ -117,9 +120,15 @@ public class PolicyRegistry {
         if (file.policies() == null) {
             return compiled;
         }
+        Set<String> names = new HashSet<>();
         for (PolicyDefinition def : file.policies()) {
-            if (def.name() == null || def.route() == null) {
-                throw new IllegalArgumentException("Policy needs name and route: " + def);
+            if (def == null) {
+                throw new IllegalArgumentException("Policy definition cannot be null");
+            }
+            validateIdentity(def.name(), "name", MAX_POLICY_NAME_LENGTH);
+            validateIdentity(def.route(), "route", MAX_POLICY_ROUTE_LENGTH);
+            if (!names.add(def.name())) {
+                throw new IllegalArgumentException("Duplicate policy name: " + def.name());
             }
             compiled.add(new CompiledPolicy(
                     def.name(),
@@ -136,9 +145,37 @@ public class PolicyRegistry {
         return List.copyOf(compiled);
     }
 
+    private static void validateIdentity(String value, String field, int maximumLength) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Policy " + field + " is required");
+        }
+        if (value.length() > maximumLength) {
+            throw new IllegalArgumentException(
+                    "Policy " + field + " cannot exceed " + maximumLength + " characters");
+        }
+    }
+
     private RateLimitConfig toRateLimitConfig(PolicyDefinition.RateLimitSpec spec) {
         if (spec == null) {
             return null;
+        }
+        if (spec.algorithm() == null) {
+            throw new IllegalArgumentException("policy rate-limit algorithm is required");
+        }
+        switch (spec.algorithm()) {
+            case FIXED_WINDOW, SLIDING_WINDOW_COUNTER, SLIDING_WINDOW_LOG -> {
+                if (spec.limit() <= 0 || spec.windowSeconds() <= 0) {
+                    throw new IllegalArgumentException(
+                            "window rate-limit requires positive limit and window-seconds");
+                }
+            }
+            case TOKEN_BUCKET, LEAKY_BUCKET -> {
+                if (!Double.isFinite(spec.ratePerSecond())
+                        || spec.ratePerSecond() <= 0 || spec.burst() <= 0) {
+                    throw new IllegalArgumentException(
+                            "bucket rate-limit requires finite positive rate-per-second and burst");
+                }
+            }
         }
         return new RateLimitConfig(spec.algorithm(), spec.limit(), spec.windowSeconds(),
                 spec.ratePerSecond(), spec.burst());
@@ -149,12 +186,25 @@ public class PolicyRegistry {
             return null;
         }
         MalucaProperties.Bands defaults = properties.bands();
-        return new MalucaProperties.Bands(
+        MalucaProperties.Bands resolved = new MalucaProperties.Bands(
                 spec.observeMin() != null ? spec.observeMin() : defaults.observeMin(),
                 spec.softLimitMin() != null ? spec.softLimitMin() : defaults.softLimitMin(),
                 spec.hardLimitMin() != null ? spec.hardLimitMin() : defaults.hardLimitMin(),
                 spec.challengeMin() != null ? spec.challengeMin() : defaults.challengeMin(),
                 spec.blockMin() != null ? spec.blockMin() : defaults.blockMin());
+        validateBands(resolved);
+        return resolved;
+    }
+
+    private static void validateBands(MalucaProperties.Bands bands) {
+        if (bands.observeMin() < 0 || bands.blockMin() > 100
+                || !(bands.observeMin() < bands.softLimitMin()
+                && bands.softLimitMin() < bands.hardLimitMin()
+                && bands.hardLimitMin() < bands.challengeMin()
+                && bands.challengeMin() < bands.blockMin())) {
+            throw new IllegalArgumentException(
+                    "resolved policy bands must be strictly increasing between 0 and 100");
+        }
     }
 
     // ── Hot reload ────────────────────────────────────────────────────────────

@@ -3,6 +3,9 @@ plugins {
 }
 
 dependencies {
+    // Shared, versioned wire contract for proxy -> triage decision export
+    implementation project(':maluca-contracts')
+
     // Reactive web stack — the proxy is fully non-blocking
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
 

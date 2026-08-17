@@ -6,9 +6,13 @@ COPY gradlew settings.gradle build.gradle ./
 COPY gradle ./gradle
 COPY maluca-proxy/build.gradle maluca-proxy/build.gradle
 COPY demo-backend/build.gradle demo-backend/build.gradle
+COPY maluca-contracts/build.gradle maluca-contracts/build.gradle
+COPY maluca-triage/build.gradle maluca-triage/build.gradle
+COPY maluca-mcp/build.gradle maluca-mcp/build.gradle
 # Warm the dependency cache before copying sources (better layer reuse)
 RUN ./gradlew :maluca-proxy:dependencies --no-daemon -q > /dev/null 2>&1 || true
 
+COPY maluca-contracts/src maluca-contracts/src
 COPY maluca-proxy/src maluca-proxy/src
 RUN ./gradlew :maluca-proxy:bootJar --no-daemon
 

@@ -51,3 +51,60 @@ groups:
         annotations:
           summary: "Under 5% of issued challenges get solved"
           description: "Either challenges only hit bots (fine) or real users are stuck on a broken challenge page (not fine). Sample challenged clients in the decision log."
+
+  - name: maluca-triage
+    rules:
+      - alert: MalucaDecisionSinkDroppingEvents
+        expr: increase(maluca_sink_dropped_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warn
+        annotations:
+          summary: "The bounded proxy decision-export queue is dropping events"
+          description: "Triage evidence is intentionally lossy under backpressure. Check maluca-triage availability and sink failure metrics; proxy request handling is unaffected."
+
+      - alert: MalucaDecisionSinkPermanentRejection
+        expr: increase(maluca_sink_permanent_dropped_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Triage permanently rejected exported decision events"
+          description: "A non-retryable HTTP 4xx response caused a complete decision batch to be discarded. Check token alignment, batch-size limits, and the triage ingest contract; record the affected interval as an evidence gap."
+
+      - alert: MalucaDecisionSinkNoSuccessfulDelivery
+        expr: >
+          (increase(maluca_sink_failure_total[10m]) >= 3)
+            and on (job, instance)
+          (increase(maluca_sink_success_total[10m]) == 0)
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Decision export is failing without a successful delivery"
+          description: "The proxy has made at least three failed sink attempts in ten minutes and delivered no events. Restore triage/PostgreSQL or the network path before the bounded queue starts losing evidence. Proxy request handling remains isolated."
+
+      - alert: MalucaTriageUnavailable
+        expr: up{job="maluca-triage"} == 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "The incident triage control plane is unavailable"
+
+      - alert: MalucaTriageManualReviewRequired
+        expr: increase(maluca_triage_agent_claims_total{result="manual_review"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Automated incident triage exhausted its retry budget"
+          description: "Inspect the TRIAGE_FAILED incident and triage_failure, correct the dependency or input problem, then use the authenticated manual triage endpoint."
+
+      - alert: MalucaMcpUnavailable
+        expr: up{job="maluca-mcp"} == 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "The MCP operational-tool server is unavailable"

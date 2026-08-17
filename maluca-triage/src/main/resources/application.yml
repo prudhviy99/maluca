@@ -1,0 +1,152 @@
+server:
+  port: ${TRIAGE_PORT:8082}
+  shutdown: graceful
+
+spring:
+  application:
+    name: maluca-triage
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  datasource:
+    url: ${TRIAGE_DATABASE_URL:jdbc:postgresql://localhost:5432/maluca}
+    username: ${TRIAGE_DATABASE_USERNAME:maluca}
+    password: ${TRIAGE_DATABASE_PASSWORD:maluca-dev-password}
+    hikari:
+      maximum-pool-size: ${TRIAGE_DB_POOL_SIZE:10}
+      connection-timeout: 5000
+  flyway:
+    enabled: true
+    validate-on-migrate: true
+  ai:
+    retry:
+      max-attempts: 2
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      init:
+        pull-model-strategy: never
+      chat:
+        options:
+          model: ${OLLAMA_CHAT_MODEL:qwen3:14b}
+          temperature: 0
+          num-ctx: ${OLLAMA_CONTEXT_SIZE:8192}
+          seed: ${OLLAMA_SEED:42}
+      embedding:
+        options:
+          model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
+    vectorstore:
+      pgvector:
+        initialize-schema: false
+        schema-validation: true
+        schema-name: public
+        table-name: runbook_chunks
+        dimensions: 768
+        distance-type: COSINE_DISTANCE
+        index-type: HNSW
+    mcp:
+      client:
+        enabled: ${MALUCA_MCP_CLIENT_ENABLED:false}
+        initialized: true
+        type: SYNC
+        request-timeout: 20s
+        toolcallback:
+          enabled: true
+        streamable-http:
+          connections:
+            operations:
+              url: ${MALUCA_MCP_URL:http://localhost:8083}
+              endpoint: /mcp
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,flyway
+  endpoint:
+    health:
+      show-details: when_authorized
+
+maluca:
+  triage:
+    security:
+      api-token: ${TRIAGE_API_TOKEN:dev-triage-api-token}
+      internal-token: ${MALUCA_INTERNAL_TOKEN:dev-maluca-internal-token}
+      mcp-token: ${MCP_API_TOKEN:dev-mcp-api-token}
+    privacy:
+      pseudonymize-client-keys: ${TRIAGE_PSEUDONYMIZE_CLIENT_KEYS:true}
+      hmac-key: ${TRIAGE_CLIENT_HMAC_KEY:dev-client-hmac-key-change-me}
+      max-path-length: 512
+    ingest:
+      max-batch-size: 500
+    detection:
+      enabled: ${TRIAGE_DETECTOR_ENABLED:true}
+      current-window: 60s
+      baseline-window: 15m
+      poll-interval: 15s
+      resolve-after: 5m
+      minimum-mitigated: 30
+      minimum-mitigation-share: 0.25
+      mitigation-multiplier: 3.0
+      challenge-block-threshold: 20
+      traffic-volume-floor: 100
+      traffic-volume-multiplier: 4.0
+      redis-error-threshold: 1
+      sample-limit: 50
+      top-value-limit: 10
+    agent:
+      enabled: ${TRIAGE_AGENT_ENABLED:true}
+      poll-interval: 10s
+      inference-timeout: ${OLLAMA_INFERENCE_TIMEOUT:90s}
+      orchestration-timeout: ${TRIAGE_AGENT_ORCHESTRATION_TIMEOUT:4m}
+      lease-timeout: ${TRIAGE_AGENT_LEASE_TIMEOUT:15m}
+      max-tool-calls: ${TRIAGE_AGENT_MAX_TOOL_CALLS:8}
+      max-attempts: ${TRIAGE_AGENT_MAX_ATTEMPTS:3}
+      retry-base-delay: ${TRIAGE_AGENT_RETRY_BASE_DELAY:30s}
+      retry-max-delay: ${TRIAGE_AGENT_RETRY_MAX_DELAY:5m}
+      max-brief-characters: ${TRIAGE_AGENT_MAX_BRIEF_CHARACTERS:16000}
+      max-sample-characters: ${TRIAGE_AGENT_MAX_SAMPLE_CHARACTERS:1200}
+      max-sample-contributions: ${TRIAGE_AGENT_MAX_SAMPLE_CONTRIBUTIONS:8}
+      model: ${OLLAMA_CHAT_MODEL:qwen3:14b}
+      prompt-version: v4
+      repair-attempts: 1
+      max-summary-words: 150
+      max-evidence-items: 12
+      allowed-tools:
+        - get_incidents
+        - get_decisions
+        - get_signal_breakdown
+        - query_metrics
+        - list_policies
+        - search_runbooks
+    retrieval:
+      top-k: 6
+      similarity-threshold: 0.45
+      runbook-location: ${TRIAGE_RUNBOOK_LOCATION:classpath*:runbooks/*.md}
+      ingest-on-startup: ${TRIAGE_INGEST_RUNBOOKS_ON_STARTUP:true}
+      embedding-dimensions: 768
+      embedding-model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
+    retention:
+      decisions: 7d
+      purge-cron: "0 17 * * * *"
+    policy:
+      file: ${POLICY_FILE:./config/policies.yml}
+      default-observe-min: 30
+      default-soft-limit-min: 50
+      default-hard-limit-min: 65
+      default-challenge-min: 75
+      default-block-min: 90
+      backup-retention: 10
+      apply-enabled: ${TRIAGE_POLICY_APPLY_ENABLED:false}
+    upstreams:
+      proxy-base-url: ${MALUCA_PROXY_URL:http://localhost:8080}
+      proxy-admin-token: ${MALUCA_ADMIN_TOKEN:dev-admin-token}
+      proxy-connect-timeout: ${TRIAGE_PROXY_CONNECT_TIMEOUT:2s}
+      proxy-read-timeout: ${TRIAGE_PROXY_READ_TIMEOUT:5s}
+      prometheus-base-url: ${PROMETHEUS_URL:http://localhost:9090}
+
+logging:
+  level:
+    root: INFO
+    com.maluca.triage: INFO

@@ -1,0 +1,12 @@
+{
+  "promptVersion": "v4",
+  "defaultModel": "qwen3:14b",
+  "embeddingModel": "nomic-embed-text",
+  "fixtureCount": 7,
+  "repetitions": 2,
+  "minimumPassRate": 0.70,
+  "thresholdKind": "acceptance-threshold",
+  "measuredPassRate": null,
+  "lastMeasuredAt": null,
+  "scoring": "classification + validation + expected citation + fixture remediation expectation; all four required per run"
+}

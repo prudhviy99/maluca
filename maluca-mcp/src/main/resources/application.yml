@@ -1,0 +1,99 @@
+server:
+  port: ${PORT:8083}
+  shutdown: graceful
+
+spring:
+  application:
+    name: maluca-mcp
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  ai:
+    mcp:
+      server:
+        enabled: true
+        protocol: STREAMABLE
+        type: SYNC
+        name: maluca-incident-operations
+        version: 0.1.0
+        instructions: >-
+          Retrieve bounded evidence and cited runbooks before proposing remediation.
+          Policy application is a separate, opt-in human-authorized capability.
+        capabilities:
+          resource: false
+          prompt: false
+          completion: false
+          tool: true
+        annotation-scanner:
+          enabled: false
+        streamable-http:
+          mcp-endpoint: /mcp
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+maluca:
+  mcp:
+    # Empty means every protected endpoint returns 401. Set this in every environment.
+    apply-enabled: ${MALUCA_MCP_APPLY_ENABLED:false}
+    security:
+      bearer-token: ${MCP_API_TOKEN:${MALUCA_MCP_BEARER_TOKEN:}}
+      approval-bearer-token: ${MCP_APPLY_TOKEN:${MALUCA_MCP_APPROVAL_BEARER_TOKEN:}}
+      approval-principal: ${MCP_APPLY_PRINCIPAL:maluca-operator}
+    # Dedicated triage ROLE_OPERATOR credential; never used for reads/proposals.
+    triage-approval-token: ${TRIAGE_API_TOKEN:}
+
+    triage:
+      base-url: ${MALUCA_TRIAGE_URL:http://localhost:8082}
+      auth-token: ${MALUCA_INTERNAL_TOKEN:}
+      connect-timeout: 2s
+      read-timeout: 5s
+      max-response-bytes: 1048576
+
+    proxy:
+      base-url: ${MALUCA_PROXY_URL:http://localhost:8080}
+      auth-token: ${MALUCA_ADMIN_TOKEN:}
+      connect-timeout: 2s
+      read-timeout: 5s
+      max-response-bytes: 1048576
+
+    prometheus:
+      base-url: ${PROMETHEUS_URL:http://localhost:9090}
+      auth-token: ${PROMETHEUS_BEARER_TOKEN:}
+      connect-timeout: 2s
+      read-timeout: 8s
+      max-response-bytes: 2097152
+
+    limits:
+      default-result-limit: 100
+      max-result-limit: 200
+      default-runbook-limit: 8
+      max-runbook-limit: 12
+      max-query-characters: 2048
+      max-rationale-characters: 2000
+      max-patch-entries: 100
+      max-evidence-window: 24h
+
+    promql:
+      allowed-metric-prefixes:
+        - maluca_
+        - http_server_
+        - jvm_
+        - process_
+        - system_
+        - up
+      max-range: 6h
+      min-step: 15s
+      query-timeout: 5s
+      max-samples: 5000
+      max-series: 50
+
+logging:
+  level:
+    root: INFO
+    com.maluca.mcp: INFO

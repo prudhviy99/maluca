@@ -20,6 +20,58 @@ python3 scripts/bench/latency_bench.py --target http://localhost:8080 --rps 200 
 DURATION=30s RATE=2000 scripts/bench/run_wrk2.sh    # if wrk2 is installed
 ```
 
+The stdlib harness accepts an explicit discarded warm-up, JSON output, and
+fail-closed smoke thresholds. For example:
+
+```bash
+python3 scripts/bench/latency_bench.py \
+  --target http://localhost:8080 --path / --rps 100 \
+  --warmup-duration 5 --duration 10 \
+  --max-p99-ms 1000 --max-transport-error-rate 0 --max-http-5xx-rate 0 \
+  --output-json build/benchmarks/baseline.json --label baseline
+```
+
+These thresholds are CI guardrails, not published capacity results. The
+one-second end-to-end ceiling deliberately tolerates shared-runner/JVM noise
+and catches a catastrophic request-path stall; the service SLO remains the
+proxy's own `maluca_added_latency_seconds` p99 under controlled conditions.
+
+### Enabled sink with an unavailable receiver
+
+The CI load-test job retains the ordinary sink-disabled smoke run, then starts
+a second proxy on port 8084 with:
+
+- `MALUCA_DECISION_SINK_ENABLED=true`;
+- batch size one so delivery is attempted during warm-up;
+- a closed loopback receiver at `http://127.0.0.1:1`;
+- bounded 250 ms delivery timeout/backoff; and
+- the same backend, Redis, path, rate, warm-up, and measured duration as the
+  baseline.
+
+The candidate run must have zero transport failures, zero HTTP 5xx responses,
+p99 at most one second, and no more than 250 ms p99 regression against the JSON
+baseline. CI also requires `maluca_sink_failure_total >= 1`, proving the
+receiver was actually unreachable rather than silently benchmarking a disabled
+or idle sink. Both JSON results and JVM logs are uploaded as the
+`benchmark-results` artifact.
+
+To reproduce the candidate after starting the two proxy configurations shown
+in [the CI workflow](../.github/workflows/ci.yml):
+
+```bash
+python3 scripts/bench/latency_bench.py \
+  --target http://localhost:8084 --path / --rps 100 \
+  --warmup-duration 5 --duration 10 \
+  --max-p99-ms 1000 --max-transport-error-rate 0 --max-http-5xx-rate 0 \
+  --baseline-json build/benchmarks/baseline.json \
+  --max-p99-regression-ms 250 \
+  --output-json build/benchmarks/sink-unreachable.json \
+  --label sink-enabled-unreachable
+python3 scripts/bench/assert_prometheus_metric.py \
+  --url http://localhost:8084/actuator/prometheus \
+  --metric maluca_sink_failure_total --minimum 1
+```
+
 ## Coordinated omission — read this first
 
 The single most common way latency benchmarks lie: a closed-loop client

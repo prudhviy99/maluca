@@ -1,0 +1,93 @@
+[
+  {
+    "scenario": "burst.py",
+    "classification": "BURST_FLOOD",
+    "policyName": "api",
+    "route": "/api/**",
+    "brief": "policy=api route=/api/** totalDecisions=420 mitigatedDecisions=310 distinctClients=1 distinctPaths=2 topContribution=burst_10s action_BLOCK=190 action_CHALLENGE=120",
+    "chunkId": "burst-flood.md#confirm",
+    "source": "burst-flood.md",
+    "heading": "Confirm",
+    "runbook": "Confirm a burst flood by checking a steep burst_10s contribution, a concentrated client, and rapid challenge or block escalation.",
+    "patchExpectation": "OPTIONAL_SCOPED",
+    "expectedPatchFields": []
+  },
+  {
+    "scenario": "distributed.py",
+    "classification": "DISTRIBUTED_FLOOD",
+    "policyName": "api",
+    "route": "/api/**",
+    "brief": "policy=api route=/api/** totalDecisions=1600 mitigatedDecisions=80 distinctClients=650 distinctPaths=3 aggregateVolumeMultiplier=8.2 individualClientRate=low",
+    "chunkId": "distributed-flood.md#confirm",
+    "source": "distributed-flood.md",
+    "heading": "Confirm",
+    "runbook": "Confirm a distributed flood when aggregate traffic is anomalous across many client identities while individual rates remain low.",
+    "patchExpectation": "OPTIONAL_SCOPED",
+    "expectedPatchFields": []
+  },
+  {
+    "scenario": "scan.py",
+    "classification": "PATH_SCAN",
+    "policyName": "api",
+    "route": "/api/**",
+    "brief": "policy=api route=/api/** totalDecisions=260 mitigatedDecisions=140 distinctClients=2 distinctPaths=47 topContribution=path_scan_30s fourxxResponses=91",
+    "chunkId": "path-scan.md#confirm",
+    "source": "path-scan.md",
+    "heading": "Confirm",
+    "runbook": "Confirm path scanning through unusually high distinct-path counts, path_scan_30s, and repeated 4xx results from concentrated clients.",
+    "patchExpectation": "OPTIONAL_SCOPED",
+    "expectedPatchFields": []
+  },
+  {
+    "scenario": "credstuff.py",
+    "classification": "CREDENTIAL_STUFFING",
+    "policyName": "login",
+    "route": "/login",
+    "brief": "policy=login route=/login totalDecisions=240 mitigatedDecisions=205 distinctClients=35 distinctPaths=1 topContribution=sensitive_60s limit_exceeded=180 authenticationFailures=217 containmentInsufficient=true remediationRequired=true",
+    "chunkId": "credential-stuffing.md#confirm",
+    "source": "credential-stuffing.md",
+    "heading": "Confirm",
+    "runbook": "Confirm credential stuffing on the exact login route with authentication failure aggregates, sensitive_60s, and limit_exceeded evidence. For insufficient containment, propose a typed route-scoped rateLimit or bands adjustment for the login policy.",
+    "patchExpectation": "REQUIRED_SCOPED",
+    "expectedPatchFields": ["rateLimit", "bands"]
+  },
+  {
+    "scenario": "lowslow.py",
+    "classification": "LOW_AND_SLOW",
+    "policyName": "api",
+    "route": "/api/**",
+    "brief": "policy=api route=/api/** totalDecisions=900 mitigatedDecisions=55 distinctClients=120 distinctPaths=4 currentWindowMinutes=30 individualClientRatePerSecond=0.2 sustainedAggregateRate=high",
+    "chunkId": "low-and-slow.md#confirm",
+    "source": "low-and-slow.md",
+    "heading": "Confirm",
+    "runbook": "Confirm low-and-slow traffic across a long window: low individual client rates, broad identities, and sustained abnormal aggregate volume.",
+    "patchExpectation": "OPTIONAL_SCOPED",
+    "expectedPatchFields": []
+  },
+  {
+    "scenario": "kill_redis.sh",
+    "classification": "REDIS_DEGRADATION",
+    "policyName": "login",
+    "route": "/login",
+    "brief": "policy=login route=/login totalDecisions=75 mitigatedDecisions=75 redisErrors=75 reason=redis_down_fail_closed computedAction=BLOCK",
+    "chunkId": "redis-degradation.md#confirm",
+    "source": "redis-degradation.md",
+    "heading": "Confirm",
+    "runbook": "Confirm Redis degradation from redis_down failure reasons and Redis error metrics before attributing the blocks to hostile traffic. Restore Redis rather than proposing a proxy policy mutation.",
+    "patchExpectation": "FORBIDDEN",
+    "expectedPatchFields": []
+  },
+  {
+    "scenario": "normal-forced-window",
+    "classification": "FALSE_POSITIVE_WAVE",
+    "policyName": "api",
+    "route": "/api/**",
+    "brief": "policy=api route=/api/** totalDecisions=350 mitigatedDecisions=240 distinctClients=210 knownGoodClients=190 changeImmediatelyAfterPolicyReload=true businessSuccessRate=normal customerImpact=severe remediationRequired=true",
+    "chunkId": "false-positive-wave.md#confirm",
+    "source": "false-positive-wave.md",
+    "heading": "Confirm",
+    "runbook": "Confirm a false-positive wave by correlating diverse known-good clients and normal business success with a recent policy reload. For severe customer impact, propose a route-scoped OBSERVE mode, rateLimit, or bands relaxation for human review.",
+    "patchExpectation": "REQUIRED_SCOPED",
+    "expectedPatchFields": ["mode", "rateLimit", "bands"]
+  }
+]

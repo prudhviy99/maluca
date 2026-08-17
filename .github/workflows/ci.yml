@@ -44,6 +44,24 @@ jobs:
           REDIS_PORT: "6379"
         run: ./gradlew build --no-daemon
 
+      - name: Validate base and AI-stack Compose manifests
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.triage.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.triage.yml \
+            -f docker-compose.gpu.yml config --quiet
+
+      - name: Validate Prometheus configuration and alert rules
+        run: |
+          docker run --rm --entrypoint /bin/promtool \
+            -v "$PWD/infra/alerts.yml:/etc/prometheus/alerts.yml:ro" \
+            prom/prometheus:v2.53.0 \
+            check rules /etc/prometheus/alerts.yml
+          docker run --rm --entrypoint /bin/promtool \
+            -v "$PWD/infra/alerts.yml:/etc/prometheus/alerts.yml:ro" \
+            -v "$PWD/infra/prometheus-triage.yml:/etc/prometheus/prometheus.yml:ro" \
+            prom/prometheus:v2.53.0 \
+            check config /etc/prometheus/prometheus.yml
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -59,6 +77,11 @@ jobs:
         image: redis:7.2-alpine
         ports:
           - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -69,15 +92,84 @@ jobs:
       - name: Build jars
         run: ./gradlew bootJar --no-daemon
 
+      - name: Test benchmark harness
+        run: python3 -m unittest discover -s scripts/bench -p 'test_*.py'
+
       - name: Boot backend + proxy
         run: |
-          java -jar demo-backend/build/libs/*.jar &
-          REDIS_HOST=localhost java -jar maluca-proxy/build/libs/*.jar &
+          java -jar demo-backend/build/libs/*.jar >"$RUNNER_TEMP/demo-backend.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/demo-backend.pid"
+          REDIS_HOST=localhost java -jar maluca-proxy/build/libs/*.jar \
+            >"$RUNNER_TEMP/proxy-sink-disabled.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/proxy-sink-disabled.pid"
           for i in $(seq 1 40); do
-            curl -sf http://localhost:8080/actuator/health && break || sleep 2
+            curl -sf --max-time 2 http://localhost:8081/actuator/health && break || sleep 2
           done
+          curl -fsS --max-time 5 http://localhost:8081/actuator/health
+          for i in $(seq 1 40); do
+            curl -sf --max-time 2 http://localhost:8080/actuator/health && break || sleep 2
+          done
+          curl -fsS --max-time 5 http://localhost:8080/actuator/health
 
-      - name: Smoke latency check (fails if p99 added latency regresses badly)
+      - name: Smoke end-to-end latency check
         run: |
           python3 scripts/bench/latency_bench.py --target http://localhost:8080 \
-            --path / --rps 100 --duration 10 --label ci
+            --path / --rps 100 --warmup-duration 5 --duration 10 \
+            --max-p99-ms 1000 --max-transport-error-rate 0 --max-http-5xx-rate 0 \
+            --output-json "$RUNNER_TEMP/sink-disabled.json" --label ci-sink-disabled
+
+      - name: Boot proxy with unreachable decision sink
+        run: |
+          PORT=8084 \
+          UPSTREAM_URL=http://localhost:8081 \
+          REDIS_HOST=localhost \
+          MALUCA_DECISION_SINK_ENABLED=true \
+          MALUCA_DECISION_SINK_ENDPOINT=http://127.0.0.1:1/internal/v1/decisions \
+          MALUCA_INTERNAL_TOKEN=ci-unreachable-sink-token \
+          MALUCA_DECISION_SINK_QUEUE_CAPACITY=5000 \
+          MALUCA_DECISION_SINK_BATCH_SIZE=1 \
+          MALUCA_DECISION_SINK_FLUSH_INTERVAL=50ms \
+          MALUCA_DECISION_SINK_REQUEST_TIMEOUT=250ms \
+          MALUCA_DECISION_SINK_INITIAL_BACKOFF=50ms \
+          MALUCA_DECISION_SINK_MAX_BACKOFF=250ms \
+          java -jar maluca-proxy/build/libs/*.jar \
+            >"$RUNNER_TEMP/proxy-sink-unreachable.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/proxy-sink-unreachable.pid"
+          for i in $(seq 1 40); do
+            curl -sf --max-time 2 http://localhost:8084/actuator/health && break || sleep 2
+          done
+          curl -fsS --max-time 5 http://localhost:8084/actuator/health
+
+      - name: Unreachable decision sink stays off the request path
+        run: |
+          python3 scripts/bench/latency_bench.py --target http://localhost:8084 \
+            --path / --rps 100 --warmup-duration 5 --duration 10 \
+            --max-p99-ms 1000 --max-transport-error-rate 0 --max-http-5xx-rate 0 \
+            --baseline-json "$RUNNER_TEMP/sink-disabled.json" \
+            --max-p99-regression-ms 250 \
+            --output-json "$RUNNER_TEMP/sink-unreachable.json" \
+            --label ci-sink-enabled-unreachable
+          python3 scripts/bench/assert_prometheus_metric.py \
+            --url http://localhost:8084/actuator/prometheus \
+            --metric maluca_sink_failure_total --minimum 1
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            ${{ runner.temp }}/sink-disabled.json
+            ${{ runner.temp }}/sink-unreachable.json
+            ${{ runner.temp }}/demo-backend.log
+            ${{ runner.temp }}/proxy-sink-disabled.log
+            ${{ runner.temp }}/proxy-sink-unreachable.log
+
+      - name: Stop benchmark processes
+        if: always()
+        run: |
+          for pid_file in "$RUNNER_TEMP"/*.pid; do
+            if [ -f "$pid_file" ]; then
+              kill "$(cat "$pid_file")" 2>/dev/null || true
+            fi
+          done

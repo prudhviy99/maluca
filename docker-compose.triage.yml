@@ -1,0 +1,178 @@
+# Opt-in AI incident-triage stack. Start with:
+# docker compose -f docker-compose.yml -f docker-compose.triage.yml --profile triage up --build
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.5-pg16-bookworm
+    container_name: maluca-postgres
+    environment:
+      POSTGRES_DB: maluca
+      POSTGRES_USER: maluca
+      POSTGRES_PASSWORD: ${TRIAGE_DATABASE_PASSWORD:-maluca-dev-password}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - maluca-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maluca -d maluca"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - maluca-net
+    profiles: [triage]
+
+  ollama:
+    image: ollama/ollama:0.32.5
+    container_name: maluca-ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - maluca-ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - maluca-net
+    profiles: [triage]
+
+  ollama-init:
+    image: ollama/ollama:0.32.5
+    container_name: maluca-ollama-init
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        ollama pull "$${OLLAMA_CHAT_MODEL}" &&
+        ollama pull "$${OLLAMA_EMBEDDING_MODEL}"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:14b}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - maluca-net
+    profiles: [triage]
+
+  maluca-proxy:
+    environment:
+      POLICY_FILE: /app/config/policies.yml
+      MALUCA_DECISION_SINK_ENABLED: "true"
+      MALUCA_DECISION_SINK_ENDPOINT: http://maluca-triage:8082/internal/v1/decisions
+      MALUCA_INTERNAL_TOKEN: ${MALUCA_INTERNAL_TOKEN:-dev-maluca-internal-token}
+      # Demo-only: published host traffic enters through this stack's fixed
+      # bridge gateway. Trust that exact peer so traffic generators can model
+      # distinct clients with X-Forwarded-For without trusting arbitrary peers.
+      TRUST_XFF: "true"
+      TRUSTED_PROXIES: "172.31.250.1"
+    volumes:
+      - ./config:/app/config:ro
+
+  prometheus:
+    ports: !override
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./infra/prometheus-triage.yml:/etc/prometheus/prometheus.yml:ro
+    profiles: [triage]
+
+  maluca-mcp:
+    build:
+      context: .
+      dockerfile: maluca-mcp/Dockerfile
+    container_name: maluca-mcp
+    ports:
+      - "127.0.0.1:8083:8083"
+    environment:
+      MCP_API_TOKEN: ${MCP_API_TOKEN:-dev-mcp-api-token}
+      MCP_APPLY_TOKEN: ${MCP_APPLY_TOKEN:-dev-mcp-apply-token}
+      MCP_APPLY_PRINCIPAL: ${MCP_APPLY_PRINCIPAL:-maluca-operator}
+      MALUCA_MCP_APPLY_ENABLED: ${MALUCA_MCP_APPLY_ENABLED:-false}
+      MALUCA_INTERNAL_TOKEN: ${MALUCA_INTERNAL_TOKEN:-dev-maluca-internal-token}
+      TRIAGE_API_TOKEN: ${TRIAGE_API_TOKEN:-dev-triage-api-token}
+      MALUCA_ADMIN_TOKEN: ${MALUCA_ADMIN_TOKEN:-dev-admin-token}
+      MALUCA_TRIAGE_URL: http://maluca-triage:8082
+      MALUCA_PROXY_URL: http://maluca-proxy:8080
+      PROMETHEUS_URL: http://prometheus:9090
+    depends_on:
+      maluca-proxy:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+    networks:
+      - maluca-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    profiles: [triage]
+
+  maluca-triage:
+    build:
+      context: .
+      dockerfile: maluca-triage/Dockerfile
+    container_name: maluca-triage
+    ports:
+      - "127.0.0.1:8082:8082"
+    environment:
+      TRIAGE_DATABASE_URL: jdbc:postgresql://postgres:5432/maluca
+      TRIAGE_DATABASE_USERNAME: maluca
+      TRIAGE_DATABASE_PASSWORD: ${TRIAGE_DATABASE_PASSWORD:-maluca-dev-password}
+      TRIAGE_API_TOKEN: ${TRIAGE_API_TOKEN:-dev-triage-api-token}
+      TRIAGE_CLIENT_HMAC_KEY: ${TRIAGE_CLIENT_HMAC_KEY:-dev-client-hmac-key-change-me}
+      MALUCA_INTERNAL_TOKEN: ${MALUCA_INTERNAL_TOKEN:-dev-maluca-internal-token}
+      MALUCA_ADMIN_TOKEN: ${MALUCA_ADMIN_TOKEN:-dev-admin-token}
+      MALUCA_PROXY_URL: http://maluca-proxy:8080
+      TRIAGE_PROXY_CONNECT_TIMEOUT: ${TRIAGE_PROXY_CONNECT_TIMEOUT:-2s}
+      TRIAGE_PROXY_READ_TIMEOUT: ${TRIAGE_PROXY_READ_TIMEOUT:-5s}
+      PROMETHEUS_URL: http://prometheus:9090
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:14b}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      OLLAMA_CONTEXT_SIZE: ${OLLAMA_CONTEXT_SIZE:-8192}
+      OLLAMA_SEED: ${OLLAMA_SEED:-42}
+      OLLAMA_INFERENCE_TIMEOUT: ${OLLAMA_INFERENCE_TIMEOUT:-90s}
+      TRIAGE_AGENT_ORCHESTRATION_TIMEOUT: ${TRIAGE_AGENT_ORCHESTRATION_TIMEOUT:-4m}
+      TRIAGE_AGENT_LEASE_TIMEOUT: ${TRIAGE_AGENT_LEASE_TIMEOUT:-15m}
+      TRIAGE_AGENT_MAX_TOOL_CALLS: ${TRIAGE_AGENT_MAX_TOOL_CALLS:-8}
+      TRIAGE_AGENT_MAX_ATTEMPTS: ${TRIAGE_AGENT_MAX_ATTEMPTS:-3}
+      TRIAGE_AGENT_RETRY_BASE_DELAY: ${TRIAGE_AGENT_RETRY_BASE_DELAY:-30s}
+      TRIAGE_AGENT_RETRY_MAX_DELAY: ${TRIAGE_AGENT_RETRY_MAX_DELAY:-5m}
+      TRIAGE_AGENT_MAX_BRIEF_CHARACTERS: ${TRIAGE_AGENT_MAX_BRIEF_CHARACTERS:-16000}
+      TRIAGE_AGENT_MAX_SAMPLE_CHARACTERS: ${TRIAGE_AGENT_MAX_SAMPLE_CHARACTERS:-1200}
+      TRIAGE_AGENT_MAX_SAMPLE_CONTRIBUTIONS: ${TRIAGE_AGENT_MAX_SAMPLE_CONTRIBUTIONS:-8}
+      POLICY_FILE: /app/config/policies.yml
+      TRIAGE_POLICY_APPLY_ENABLED: ${TRIAGE_POLICY_APPLY_ENABLED:-false}
+      MALUCA_MCP_CLIENT_ENABLED: "true"
+      MALUCA_MCP_URL: http://maluca-mcp:8083
+      MCP_API_TOKEN: ${MCP_API_TOKEN:-dev-mcp-api-token}
+    volumes:
+      - ./config:/app/config
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+      maluca-mcp:
+        condition: service_healthy
+    networks:
+      - maluca-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    profiles: [triage]
+
+volumes:
+  maluca-postgres-data:
+  maluca-ollama-models:
+
+networks:
+  maluca-net:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+          gateway: 172.31.250.1

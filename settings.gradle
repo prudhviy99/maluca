@@ -2,3 +2,6 @@ rootProject.name = 'maluca'
 
 include 'maluca-proxy'
 include 'demo-backend'
+include 'maluca-contracts'
+include 'maluca-triage'
+include 'maluca-mcp'

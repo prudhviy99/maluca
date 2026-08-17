@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -106,6 +107,108 @@ class PolicyRegistryTest {
         assertThat(ok).isFalse();
         assertThat(registry.snapshot()).as("last good config stays active").hasSize(1);
         assertThat(registry.resolve("/x", "anonymous").name()).isEqualTo("only");
+    }
+
+    @Test
+    void invalidPolicyIdentitiesKeepPreviousPolicies(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("policies.yml");
+        Files.writeString(file, """
+                policies:
+                  - name: stable
+                    route: /**
+                """);
+        PolicyRegistry registry = new PolicyRegistry(withPolicyFile(file.toString()));
+
+        List<String> invalidFiles = List.of(
+                """
+                policies:
+                  - name: ' '
+                    route: /**
+                """,
+                """
+                policies:
+                  - name: %s
+                    route: /**
+                """.formatted("n".repeat(129)),
+                """
+                policies:
+                  - name: blank-route
+                    route: ' '
+                """,
+                """
+                policies:
+                  - name: long-route
+                    route: %s
+                """.formatted("/" + "r".repeat(512)),
+                """
+                policies:
+                  - name: duplicate
+                    route: /one
+                  - name: duplicate
+                    route: /two
+                """);
+
+        for (String invalidFile : invalidFiles) {
+            Files.writeString(file, invalidFile);
+
+            assertThat(registry.load()).as("invalid reload is rejected").isFalse();
+            assertThat(registry.snapshot()).as("last good config stays active").hasSize(1);
+            assertThat(registry.resolve("/x", "anonymous").name()).isEqualTo("stable");
+        }
+    }
+
+    @Test
+    void policyIdentityWireBoundsAreInclusive(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("policies.yml");
+        String name = "n".repeat(128);
+        String route = "/" + "r".repeat(511);
+        Files.writeString(file, """
+                policies:
+                  - name: %s
+                    route: %s
+                """.formatted(name, route));
+
+        PolicyRegistry registry = new PolicyRegistry(withPolicyFile(file.toString()));
+
+        assertThat(registry.snapshot()).singleElement()
+                .extracting(CompiledPolicy::name)
+                .isEqualTo(name);
+    }
+
+    @Test
+    void resolvedPartialBandsMustRemainStrictlyIncreasing(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("policies.yml");
+        Files.writeString(file, """
+                policies:
+                  - name: only
+                    route: /**
+                    bands:
+                      hard-limit-min: 20
+                """);
+
+        PolicyRegistry registry = new PolicyRegistry(withPolicyFile(file.toString()));
+
+        assertThat(registry.snapshot()).isEmpty();
+        assertThat(registry.load()).isFalse();
+    }
+
+    @Test
+    void invalidAlgorithmSpecificRateValuesRejectTheReload(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("policies.yml");
+        Files.writeString(file, """
+                policies:
+                  - name: only
+                    route: /**
+                    rate-limit:
+                      algorithm: TOKEN_BUCKET
+                      rate-per-second: 0
+                      burst: 0
+                """);
+
+        PolicyRegistry registry = new PolicyRegistry(withPolicyFile(file.toString()));
+
+        assertThat(registry.snapshot()).isEmpty();
+        assertThat(registry.load()).isFalse();
     }
 
     @Test
